@@ -16,6 +16,7 @@ export type BackupData = {
   movies: MovieItem[];
   games: GameItem[];
   purchases: PurchaseItem[];
+  gamification?: unknown; // данные геймификации из localStorage
 };
 
 const log = getLogger('backup');
@@ -35,6 +36,18 @@ export async function getBackupData(): Promise<BackupData> {
     db.games.toArray(),
     db.purchases.toArray(),
   ]);
+  
+  // Экспортируем данные геймификации из localStorage
+  let gamification: unknown = undefined;
+  try {
+    const gamificationRaw = localStorage.getItem('GAMIFICATION_STATE_V1');
+    if (gamificationRaw) {
+      gamification = JSON.parse(gamificationRaw);
+    }
+  } catch (err) {
+    console.warn('Не удалось экспортировать данные геймификации:', err);
+  }
+  
   const data: BackupData = {
     $schema: 'https://example.local/detective-board/backup.schema.json',
     version: 1,
@@ -46,6 +59,7 @@ export async function getBackupData(): Promise<BackupData> {
     movies,
     games,
     purchases,
+    gamification,
   };
   return data;
 }
@@ -90,6 +104,16 @@ export async function importBackup(file: File, mode: 'replace' | 'merge' = 'repl
   const movies = Array.isArray(data.movies) ? (data.movies as MovieItem[]) : [];
   const games = Array.isArray(data.games) ? (data.games as GameItem[]) : [];
   const purchases = Array.isArray(data.purchases) ? (data.purchases as PurchaseItem[]) : [];
+  
+  // Импортируем данные геймификации в localStorage
+  if (data.gamification !== undefined) {
+    try {
+      localStorage.setItem('GAMIFICATION_STATE_V1', JSON.stringify(data.gamification));
+      log.info('import:gamification:done');
+    } catch (err) {
+      console.warn('Не удалось импортировать данные геймификации:', err);
+    }
+  }
 
   if (mode === 'replace') {
     await db.transaction('rw', [db.nodes, db.links, db.users, db.books, db.movies, db.games, db.purchases], async () => {

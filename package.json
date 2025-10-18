@@ -20,7 +20,6 @@
     "test:drag": "playwright test tests/simple-drag-test.spec.ts --headed --project=chromium",
     "pw:install": "playwright install",
     "check": "npm run lint && npm run test && npm run test:e2e",
-    "prepare": "husky"
   },
   "dependencies": {
     "dexie": "^4.2.0",
@@ -44,9 +43,7 @@
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.20",
     "globals": "^16.3.0",
-    "husky": "^9.1.7",
     "jsdom": "^25.0.1",
-    "lint-staged": "^15.2.11",
     "node-fetch": "^3.3.2",
     "prettier": "^3.4.2",
     "typescript": "~5.8.3",
@@ -54,8 +51,6 @@
     "vite": "^7.1.2",
     "vitest": "^2.1.8"
   },
-  "lint-staged": {
-    "*.{ts,tsx}": [
       "eslint --fix",
       "vitest related --run"
     ],

@@ -180,58 +180,95 @@ export const useAppStore = create<AppState>((set, get) => ({
         log.warn('init:graph:analyze-failed', { error: String(e instanceof Error ? e.message : e) });
       }
 
+      async function tryBootstrapFromFile(): Promise<boolean> {
+        try {
+          const res = await fetch('/bootstrap-backup.json', { cache: 'no-store' });
+          if (!res.ok) return false;
+          const data = await res.json();
+          const nodesB = Array.isArray((data as any).nodes) ? (data as any).nodes : [];
+          const linksB = Array.isArray((data as any).links) ? (data as any).links : [];
+          const usersB = Array.isArray((data as any).users) ? (data as any).users : [];
+          const booksB = Array.isArray((data as any).books) ? (data as any).books : [];
+          const moviesB = Array.isArray((data as any).movies) ? (data as any).movies : [];
+          const gamesB = Array.isArray((data as any).games) ? (data as any).games : [];
+          const purchasesB = Array.isArray((data as any).purchases) ? (data as any).purchases : [];
+          if (nodesB.length === 0 && linksB.length === 0 && usersB.length === 0 && booksB.length === 0 && moviesB.length === 0 && gamesB.length === 0 && purchasesB.length === 0) {
+            return false;
+          }
+          await db.transaction('rw', [db.nodes, db.links, db.users, db.books, db.movies, db.games, db.purchases], async () => {
+            if (nodesB.length) await db.nodes.bulkAdd(nodesB);
+            if (linksB.length) await db.links.bulkAdd(linksB);
+            if (usersB.length) await db.users.bulkAdd(usersB);
+            if (booksB.length) await db.books.bulkAdd(booksB);
+            if (moviesB.length) await db.movies.bulkAdd(moviesB);
+            if (gamesB.length) await db.games.bulkAdd(gamesB);
+            if (purchasesB.length) await db.purchases.bulkAdd(purchasesB);
+          });
+          set({ nodes: nodesB, links: linksB, users: usersB, initialized: true });
+          log.info('init:bootstrap:imported', { nodes: nodesB.length, links: linksB.length, users: usersB.length });
+          return true;
+        } catch (e) {
+          log.warn('init:bootstrap:failed', { error: String(e instanceof Error ? e.message : e) });
+          return false;
+        }
+      }
+
       if (nodesCopy.length === 0) {
-        // seed demo data
-        log.warn('init:empty-db, seeding demo data');
-        const rootTask1: TaskNode = {
-          id: crypto.randomUUID(),
-          type: 'task',
-          parentId: null,
-          x: 200,
-          y: 200,
-          width: 200,
-          height: 140,
-          title: 'Начать доску',
-          description: 'Добавить задачи и объединить в группы',
-          status: 'in_progress',
-          color: '#E8D8A6',
-          createdAt: now(),
-          updatedAt: now(),
-          isActual: true,
-        };
-        const rootGroup: GroupNode = {
-          id: crypto.randomUUID(),
-          type: 'group',
-          parentId: null,
-          x: 520,
-          y: 260,
-          width: 220,
-          height: 220,
-          name: 'Закупки',
-          color: '#9CC5B0',
-          createdAt: now(),
-          updatedAt: now(),
-          isActual: true,
-        };
-        const innerTask: TaskNode = {
-          id: crypto.randomUUID(),
-          type: 'task',
-          parentId: rootGroup.id,
-          x: 40,
-          y: 30,
-          width: 200,
-          height: 140,
-          title: 'Поставщик X',
-          description: 'Согласовать партию Y',
-          status: 'inactive',
-          color: '#F1C0B9',
-          createdAt: now(),
-          updatedAt: now(),
-          isActual: true,
-        };
-        await db.nodes.bulkAdd([rootTask1, rootGroup, innerTask]);
-        set({ nodes: [rootTask1, rootGroup, innerTask], links, users, initialized: true });
-        log.info('init:seeded', { nodes: 3, links: links.length, users: users.length });
+        // Try to import a bootstrap backup if present
+        const imported = await tryBootstrapFromFile();
+        if (!imported) {
+          // seed demo data
+          log.warn('init:empty-db, seeding demo data');
+          const rootTask1: TaskNode = {
+            id: crypto.randomUUID(),
+            type: 'task',
+            parentId: null,
+            x: 200,
+            y: 200,
+            width: 200,
+            height: 140,
+            title: 'Начать доску',
+            description: 'Добавить задачи и объединить в группы',
+            status: 'in_progress',
+            color: '#E8D8A6',
+            createdAt: now(),
+            updatedAt: now(),
+            isActual: true,
+          };
+          const rootGroup: GroupNode = {
+            id: crypto.randomUUID(),
+            type: 'group',
+            parentId: null,
+            x: 520,
+            y: 260,
+            width: 220,
+            height: 220,
+            name: 'Закупки',
+            color: '#9CC5B0',
+            createdAt: now(),
+            updatedAt: now(),
+            isActual: true,
+          };
+          const innerTask: TaskNode = {
+            id: crypto.randomUUID(),
+            type: 'task',
+            parentId: rootGroup.id,
+            x: 40,
+            y: 30,
+            width: 200,
+            height: 140,
+            title: 'Поставщик X',
+            description: 'Согласовать партию Y',
+            status: 'inactive',
+            color: '#F1C0B9',
+            createdAt: now(),
+            updatedAt: now(),
+            isActual: true,
+          };
+          await db.nodes.bulkAdd([rootTask1, rootGroup, innerTask]);
+          set({ nodes: [rootTask1, rootGroup, innerTask], links, users, initialized: true });
+          log.info('init:seeded', { nodes: 3, links: links.length, users: users.length });
+        }
       } else {
         set({ nodes: nodesCopy, links, users, initialized: true });
         log.info('init:loaded', { nodes: nodesCopy.length, links: links.length, users: users.length });
@@ -239,6 +276,23 @@ export const useAppStore = create<AppState>((set, get) => ({
     } catch (err) {
       // Fallback to in-memory state (no persistence)
       log.error('init:indexeddb-failed, using in-memory state', err);
+      // Try to load a bootstrap backup into memory if available
+      try {
+        const res = await fetch('/bootstrap-backup.json', { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          const nodesB = Array.isArray((data as any).nodes) ? (data as any).nodes : [];
+          const linksB = Array.isArray((data as any).links) ? (data as any).links : [];
+          const usersB = Array.isArray((data as any).users) ? (data as any).users : [];
+          if (nodesB.length || linksB.length || usersB.length) {
+            set({ nodes: nodesB, links: linksB, users: usersB, initialized: true });
+            log.info('init:memory-bootstrap', { nodes: nodesB.length, links: linksB.length, users: usersB.length });
+            return;
+          }
+        }
+      } catch (e) {
+        log.warn('init:memory-bootstrap:failed', { error: String(e instanceof Error ? e.message : e) });
+      }
       const rootTask1: TaskNode = {
         id: crypto.randomUUID(),
         type: 'task',

@@ -1,0 +1,20 @@
+[Unit]
+Description=Detective Board (Vite dev + Telegram)
+After=network.target
+
+[Service]
+Type=simple
+# Change to your user if different
+User=ubuntu
+WorkingDirectory=/srv/detective-board
+EnvironmentFile=/srv/detective-board/.env.local
+# Expose on all interfaces; adjust port if needed
+ExecStart=/usr/bin/npm run dev -- --host 0.0.0.0 --port 5173
+Restart=always
+RestartSec=3
+Environment=NODE_ENV=development
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
+
