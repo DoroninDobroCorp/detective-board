@@ -32,3 +32,4 @@ coverage
 *.sln
 *.sw?
 env.local.playwright-browsers/
+.playwright-browsers/
