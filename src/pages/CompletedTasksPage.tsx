@@ -6,7 +6,7 @@ import { getLogger } from '../logger';
 import { db } from '../db';
 import SmartImage from '../components/SmartImage';
 import { buildFallbackList } from '../imageSearch';
-import { useGamificationStore } from '../gamification';
+import { useGamificationStore, type Achievement } from '../gamification';
 import { ymd } from '../wellbeing';
 import { buildNodeMap } from '../taskUtils';
 
@@ -21,6 +21,13 @@ type CompletedEntry =
       completedAt: number | null;
       xp?: number;
       node: TaskNode;
+    }
+  | {
+      kind: 'achievement';
+      key: string;
+      completedAt: number | null;
+      xp?: number;
+      achievement: Achievement;
     }
   | {
       kind: 'manual';
@@ -50,6 +57,7 @@ const CompletedTasksPage: React.FC = () => {
   const revealNode = useAppStore((s) => s.revealNode);
   const completions = useGamificationStore((s) => s.completions);
   const xpHistory = useGamificationStore((s) => s.xpHistory);
+  const achievements = useGamificationStore((s) => s.achievements);
   const navigate = useNavigate();
   const log = getLogger('CompletedTasks');
 
@@ -171,6 +179,17 @@ const CompletedTasksPage: React.FC = () => {
   const combinedEntries = useMemo(() => {
     const entries: CompletedEntry[] = [];
 
+    achievements.forEach((achievement) => {
+      const completedAt = typeof achievement.achievedAt === 'number' ? achievement.achievedAt : achievement.createdAt ?? null;
+      entries.push({
+        kind: 'achievement',
+        key: `achievement:${achievement.id}`,
+        completedAt,
+        xp: achievement.xpReward,
+        achievement,
+      });
+    });
+
     doneTasks.forEach((task) => {
       const completedAt = typeof task.completedAt === 'number'
         ? task.completedAt
@@ -212,7 +231,7 @@ const CompletedTasksPage: React.FC = () => {
       const bt = b.completedAt ?? 0;
       return bt - at;
     });
-  }, [books, movies, games, purchases, doneTasks, manualXpAmount]);
+  }, [achievements, books, movies, games, purchases, doneTasks, manualXpAmount]);
 
   const groups: CompletedGroup[] = useMemo(() => {
     const map = new Map<string, CompletedEntry[]>();
@@ -383,6 +402,41 @@ const CompletedTasksPage: React.FC = () => {
                       >
                         🗑️
                       </button>
+                    </div>
+                  </div>
+                );
+              }
+
+              if (entry.kind === 'achievement') {
+                const { achievement, xp } = entry;
+                return (
+                  <div
+                    key={entry.key}
+                    className="active-item"
+                    data-item-type="achievement"
+                    data-xp-amount={typeof xp === 'number' ? xp : 'none'}
+                    title={achievement.description || achievement.title}
+                    aria-label={achievement.title}
+                  >
+                    <div className="active-item__header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <span className="badge">Достижение</span>
+                      <span className="badge" style={{ background: xp && xp < 0 ? '#fdebea' : '#e6f4ea', color: xp && xp < 0 ? '#a13737' : '#246b35' }}>
+                        {xpBadgeValue(xp)}
+                      </span>
+                    </div>
+                    {achievement.imageUrl ? (
+                      <img
+                        src={achievement.imageUrl}
+                        alt={achievement.title}
+                        style={{ width: '100%', height: 212, objectFit: 'cover', borderRadius: 6, marginBottom: 8 }}
+                      />
+                    ) : null}
+                    <div className="active-item__content">
+                      <div className="active-item__title">{achievement.title}</div>
+                      <div className="active-item__desc">{achievement.description || 'Без описания'}</div>
+                    </div>
+                    <div className="active-item__meta" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginTop: 8 }}>
+                      {timeLabel ? <span className="badge">⏱ {timeLabel}</span> : null}
                     </div>
                   </div>
                 );

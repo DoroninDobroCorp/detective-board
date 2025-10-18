@@ -48,6 +48,7 @@ export interface Achievement {
   xpReward: number;
   imageUrl?: string;
   createdAt: number;
+  achievedAt?: number;
   updatedAt?: number;
 }
 
@@ -81,7 +82,7 @@ export interface GamificationState {
   revertTaskXp: (taskId: string) => void;
   assignLevelTitle: (level: number, title: string) => void;
   clearLevelUpEvent: (level: number) => void;
-  addAchievement: (input: { title: string; description: string; xpReward: number; imageUrl?: string }) => Achievement;
+  addAchievement: (input: { title: string; description: string; xpReward: number; imageUrl?: string; achievedAt?: number }) => Achievement;
   updateAchievement: (achievement: Achievement) => void;
   removeAchievement: (id: string) => void;
   markBonusClaimed: (dateKey: string, xp: number, meta?: WellbeingBonusMeta) => void;
@@ -273,7 +274,8 @@ export const useGamificationStore = create<GamificationState>()(
           pendingLevelUps: state.pendingLevelUps.filter((evt) => evt.level !== level),
         }));
       },
-      addAchievement: ({ title, description, xpReward, imageUrl }) => {
+      addAchievement: ({ title, description, xpReward, imageUrl, achievedAt }) => {
+        const completedTs = Number.isFinite(achievedAt) ? Number(achievedAt) : Date.now();
         const achievement: Achievement = {
           id: crypto.randomUUID(),
           title,
@@ -281,17 +283,38 @@ export const useGamificationStore = create<GamificationState>()(
           xpReward: Math.max(0, normalizeXp(xpReward)),
           imageUrl,
           createdAt: Date.now(),
+          achievedAt: completedTs,
         };
         set((state) => ({ achievements: [...state.achievements, achievement] }));
         if (achievement.xpReward !== 0) {
-          get().addXp({ amount: achievement.xpReward, source: 'achievement', note: title, achievementId: achievement.id });
+          get().addXp({ amount: achievement.xpReward, source: 'achievement', note: title, achievementId: achievement.id, ts: completedTs });
         }
         return achievement;
       },
       updateAchievement: (achievement) => {
-        set((state) => ({
-          achievements: state.achievements.map((a) => (a.id === achievement.id ? { ...achievement, updatedAt: Date.now() } : a)),
-        }));
+        set((state) => {
+          const index = state.achievements.findIndex((a) => a.id === achievement.id);
+          if (index === -1) return {};
+          const prev = state.achievements[index];
+          const nextAchievement: Achievement = { ...achievement, updatedAt: Date.now() };
+          const achievements = state.achievements.slice();
+          achievements[index] = nextAchievement;
+
+          let xpHistory = state.xpHistory;
+          if ((prev.achievedAt ?? prev.createdAt) !== (nextAchievement.achievedAt ?? nextAchievement.createdAt)) {
+            const targetTs = nextAchievement.achievedAt ?? nextAchievement.createdAt;
+            xpHistory = state.xpHistory.map((entry) => (
+              entry.achievementId === nextAchievement.id
+                ? { ...entry, ts: targetTs }
+                : entry
+            ));
+          }
+
+          return {
+            achievements,
+            xpHistory,
+          };
+        });
       },
       removeAchievement: (id) => {
         set((state) => ({ achievements: state.achievements.filter((a) => a.id !== id) }));

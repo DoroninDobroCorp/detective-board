@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   useGamificationStore,
@@ -111,12 +111,40 @@ const AchievementsPage: React.FC = () => {
   const [previewImage, setPreviewImage] = useState<string>('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [newDate, setNewDate] = useState(() => toLocalDateInput(Date.now()));
+  const [newTime, setNewTime] = useState(() => toLocalTimeInput(Date.now()));
+  const [dateError, setDateError] = useState<string | null>(null);
+  const [achievementDateInputs, setAchievementDateInputs] = useState<Record<string, { date: string; time: string }>>({});
+  const [achievementDateErrors, setAchievementDateErrors] = useState<Record<string, string | null>>({});
 
   const currentTitle = levelTitles[level]?.title || `Уровень ${level}`;
   const progress = useMemo(() => progressWithinLevel(xp, level), [xp, level]);
   const todayKey = useMemo(() => ymd(), []);
   const bonus = computeBonusXp(todayKey);
   const bonusClaimed = claimedBonuses[todayKey];
+
+  useEffect(() => {
+    setAchievementDateInputs((prev) => {
+      const next: Record<string, { date: string; time: string }> = { ...prev };
+      const activeIds = new Set<string>();
+      for (const ach of achievements) {
+        activeIds.add(ach.id);
+        if (!next[ach.id]) {
+          const baseTs = ach.achievedAt ?? ach.createdAt;
+          next[ach.id] = {
+            date: toLocalDateInput(baseTs),
+            time: toLocalTimeInput(baseTs),
+          };
+        }
+      }
+      for (const key of Object.keys(next)) {
+        if (!activeIds.has(key)) {
+          delete next[key];
+        }
+      }
+      return next;
+    });
+  }, [achievements]);
 
   async function handleGeneratePreview() {
     if (!newTitle.trim()) {
@@ -140,18 +168,28 @@ const AchievementsPage: React.FC = () => {
       setError('Название достижения обязательно.');
       return;
     }
+    const parsedTs = parseDateTimeInput(newDate, newTime);
+    if (Number.isNaN(parsedTs) || parsedTs === null) {
+      setDateError('Введите дату в формате YYYY-MM-DD и время HH:MM (необязательно).');
+      return;
+    }
+    setDateError(null);
     const description = newDescription.trim();
     const xpAmount = Math.max(0, Math.round(newXp));
     let image = previewImage;
     if (!image) {
       image = await generateBadgeImage(title, description);
     }
-    addAchievement({ title, description, xpReward: xpAmount, imageUrl: image });
+    const achievedAt = parsedTs ?? Date.now();
+    addAchievement({ title, description, xpReward: xpAmount, imageUrl: image, achievedAt });
     setNewTitle('');
     setNewDescription('');
     setNewXp(300);
     setPreviewImage('');
     setError(null);
+    const now = Date.now();
+    setNewDate(toLocalDateInput(now));
+    setNewTime(toLocalTimeInput(now));
   }
 
   async function handleRegenerate(achievement: Achievement) {
@@ -186,6 +224,31 @@ const AchievementsPage: React.FC = () => {
       joy: bonus.avg.joy,
       count: bonus.avg.count,
     });
+  }
+
+  function handleAchievementDateChange(id: string, field: 'date' | 'time', value: string) {
+    setAchievementDateInputs((prev) => ({
+      ...prev,
+      [id]: {
+        date: field === 'date' ? value : prev[id]?.date ?? '',
+        time: field === 'time' ? value : prev[id]?.time ?? '',
+      },
+    }));
+    setAchievementDateErrors((prev) => ({ ...prev, [id]: null }));
+  }
+
+  function saveAchievementDate(achievement: Achievement) {
+    const inputs = achievementDateInputs[achievement.id];
+    const dateStr = inputs?.date ?? '';
+    const timeStr = inputs?.time ?? '';
+    const parsed = parseDateTimeInput(dateStr, timeStr);
+    if (Number.isNaN(parsed) || parsed === null) {
+      setAchievementDateErrors((prev) => ({ ...prev, [achievement.id]: 'Проверь формат даты и времени.' }));
+      return;
+    }
+    setAchievementDateErrors((prev) => ({ ...prev, [achievement.id]: null }));
+    const targetTs = parsed ?? Date.now();
+    updateAchievement({ ...achievement, achievedAt: targetTs });
   }
 
   const progressPercent = Math.min(100, Math.round((progress.current / progress.required) * 100));
@@ -254,6 +317,28 @@ const AchievementsPage: React.FC = () => {
               style={{ width: '100%', marginTop: 4 }} 
             />
           </label>
+          <label>
+            Дата выполнения
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 4 }}>
+              <input
+                type="date"
+                value={newDate}
+                onChange={(e) => {
+                  setNewDate(e.target.value);
+                  setDateError(null);
+                }}
+                required
+              />
+              <input
+                type="time"
+                value={newTime}
+                onChange={(e) => {
+                  setNewTime(e.target.value);
+                  setDateError(null);
+                }}
+              />
+            </div>
+          </label>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
             <button type="button" className="tool-btn" onClick={handleGeneratePreview} disabled={isGenerating}>
               {isGenerating ? 'Генерация…' : 'Попросить ИИ придумать значок'}
@@ -271,6 +356,7 @@ const AchievementsPage: React.FC = () => {
             </div>
           ) : null}
           {error ? <div style={{ color: '#ff6b6b' }}>{error}</div> : null}
+          {dateError ? <div style={{ color: '#ff6b6b' }}>{dateError}</div> : null}
           <div>
             <button type="submit" className="tool-btn">Сохранить достижение</button>
           </div>
@@ -288,6 +374,25 @@ const AchievementsPage: React.FC = () => {
                 <div style={{ fontWeight: 600 }}>{ach.title}</div>
                 <div style={{ fontSize: 12, color: '#7f93a3' }}>{ach.description || 'Без описания'}</div>
                 <div style={{ fontSize: 12, color: '#7f93a3' }}>Опыт: +{ach.xpReward}</div>
+                <div style={{ display: 'grid', gap: 6 }}>
+                  <label style={{ fontSize: 12, color: '#7f93a3' }}>
+                    Дата выполнения
+                    <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
+                      <input
+                        type="date"
+                        value={achievementDateInputs[ach.id]?.date ?? ''}
+                        onChange={(e) => handleAchievementDateChange(ach.id, 'date', e.target.value)}
+                      />
+                      <input
+                        type="time"
+                        value={achievementDateInputs[ach.id]?.time ?? ''}
+                        onChange={(e) => handleAchievementDateChange(ach.id, 'time', e.target.value)}
+                      />
+                    </div>
+                  </label>
+                  {achievementDateErrors[ach.id] ? <div style={{ color: '#ff6b6b', fontSize: 12 }}>{achievementDateErrors[ach.id]}</div> : null}
+                  <button className="tool-btn" onClick={() => saveAchievementDate(ach)}>Сохранить дату</button>
+                </div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   <button className="tool-btn" onClick={() => void handleRegenerate(ach)}>Новая картинка от ИИ</button>
                   <label className="tool-btn" style={{ cursor: 'pointer' }}>
@@ -306,3 +411,44 @@ const AchievementsPage: React.FC = () => {
 };
 
 export default AchievementsPage;
+
+function pad2(n: number): string {
+  return n < 10 ? `0${n}` : `${n}`;
+}
+
+function toLocalDateInput(ts: number): string {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function toLocalTimeInput(ts: number): string {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return '';
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+function parseDateTimeInput(dateStr: string, timeStr: string): number | null {
+  const trimmed = (dateStr || '').trim();
+  if (!trimmed) return null;
+  const parts = trimmed.split('-').map((p) => Number(p));
+  if (parts.length !== 3 || parts.some((v) => Number.isNaN(v))) {
+    return NaN;
+  }
+  const [yy, mm, dd] = parts;
+  let hh = 12;
+  let min = 0;
+  if ((timeStr || '').trim()) {
+    const tParts = timeStr.split(':').map((p) => Number(p));
+    if (tParts.length !== 2 || tParts.some((v) => Number.isNaN(v))) {
+      return NaN;
+    }
+    [hh, min] = tParts;
+  }
+  const dt = new Date(yy, mm - 1, dd, hh, min, 0, 0);
+  const stamp = dt.getTime();
+  if (Number.isNaN(stamp)) {
+    return NaN;
+  }
+  return stamp;
+}
