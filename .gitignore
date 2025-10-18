@@ -31,4 +31,4 @@ coverage
 *.njsproj
 *.sln
 *.sw?
-env.local
+env.local.playwright-browsers/
