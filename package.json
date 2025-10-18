@@ -19,7 +19,7 @@
     "test:prochee": "playwright test tests/prochee-drag.spec.ts --headed --project=chromium --timeout=60000",
     "test:drag": "playwright test tests/simple-drag-test.spec.ts --headed --project=chromium",
     "pw:install": "playwright install",
-    "check": "npm run lint && npm run test && npm run test:e2e",
+    "check": "npm run lint && npm run test && npm run test:e2e"
   },
   "dependencies": {
     "dexie": "^4.2.0",
@@ -50,12 +50,5 @@
     "typescript-eslint": "^8.39.1",
     "vite": "^7.1.2",
     "vitest": "^2.1.8"
-  },
-      "eslint --fix",
-      "vitest related --run"
-    ],
-    "*.{json,md}": [
-      "prettier --write"
-    ]
   }
 }

@@ -4,6 +4,7 @@ import type { AnyNode, LinkThread, User, BookItem, MovieItem, GameItem, Purchase
 import { useAppStore } from './store';
 import { buildAssistantContext, type AssistantContextData } from './assistant/context';
 import { loadMessages, loadPrompt, loadSavedInfo, todayKey } from './assistant/storage';
+import { useGamificationStore } from './gamification';
 
 export type BackupData = {
   $schema?: string;
@@ -17,6 +18,19 @@ export type BackupData = {
   games: GameItem[];
   purchases: PurchaseItem[];
   gamification?: unknown; // данные геймификации из localStorage
+  wellbeing?: {
+    raw?: unknown;
+    daily?: unknown;
+    monthly?: unknown;
+  };
+  assistant?: {
+    savedInfo?: string;
+    prompt?: string;
+    textProvider?: string;
+    mode?: string;
+    messages?: Record<string, unknown>;
+  };
+  localStorageExtra?: Record<string, string>; // все остальные данные из localStorage
 };
 
 const log = getLogger('backup');
@@ -24,6 +38,105 @@ const log = getLogger('backup');
 function makeFilename() {
   const iso = new Date().toISOString().replace(/[:]/g, '-');
   return `detective-board-backup-${iso}.json`;
+}
+
+/**
+ * Импорт данных геймификации с автопочинкой
+ */
+async function importGamificationData(
+  gamificationData: unknown | undefined,
+  nodes: AnyNode[],
+  books: BookItem[],
+  movies: MovieItem[],
+  games: GameItem[],
+  purchases: PurchaseItem[]
+): Promise<void> {
+  if (gamificationData === undefined) {
+    log.info('import:gamification:skipped');
+    return;
+  }
+
+  try {
+    const gamif = gamificationData as any;
+    
+    // Автопочинка 1: очищаем pendingManualCandidates чтобы избежать дубликатов при импорте
+    if (gamif.pendingManualCandidates) {
+      gamif.pendingManualCandidates = [];
+      log.info('import:gamification:auto-fix:cleared-pending-candidates');
+    }
+    
+    // Автопочинка 2: синхронизируем processedTasks со всеми завершенными задачами
+    const processedTasks = gamif.processedTasks || {};
+    let addedCount = 0;
+
+    // Собираем все завершенные задачи из nodes
+    const completedTaskNodes = nodes.filter(
+      (n) => n.type === 'task' && (n as any).status === 'done'
+    );
+    
+    for (const task of completedTaskNodes) {
+      if (!processedTasks[task.id]) {
+        processedTasks[task.id] = true;
+        addedCount++;
+      }
+    }
+
+    // Собираем завершенные элементы из медиаколлекций
+    const completedMedia = [
+      ...books.filter((item) => item.status === 'done').map((item) => ({ type: 'book', item })),
+      ...movies.filter((item) => item.status === 'done').map((item) => ({ type: 'movie', item })),
+      ...games.filter((item) => item.status === 'done').map((item) => ({ type: 'game', item })),
+      ...purchases.filter((item) => item.status === 'done').map((item) => ({ type: 'purchase', item })),
+    ];
+
+    for (const { type, item } of completedMedia) {
+      if (typeof item.completedAt === 'number') {
+        const completionId = `${type}:${item.id}:${item.completedAt}`;
+        if (!processedTasks[completionId]) {
+          processedTasks[completionId] = true;
+          addedCount++;
+        }
+      }
+    }
+
+    gamif.processedTasks = processedTasks;
+    if (addedCount > 0) {
+      log.info('import:gamification:auto-fix:processed-tasks', { added: addedCount });
+    }
+    
+    // Сохраняем в localStorage
+    localStorage.setItem('GAMIFICATION_STATE_V1', JSON.stringify(gamif));
+    
+    // Принудительно обновляем zustand store напрямую
+    try {
+      useGamificationStore.setState({
+        xp: gamif.xp || 0,
+        level: gamif.level || 1,
+        xpHistory: gamif.xpHistory || [],
+        completions: gamif.completions || [],
+        processedTasks: gamif.processedTasks || {},
+        achievements: gamif.achievements || [],
+        levelTitles: gamif.levelTitles || { 1: { title: 'Новичок', assignedAt: Date.now() } },
+        claimedBonuses: gamif.claimedBonuses || {},
+        pendingLevelUps: gamif.pendingLevelUps || [],
+        pendingManualCandidates: gamif.pendingManualCandidates || [],
+      });
+      log.info('import:gamification:state-updated');
+    } catch (stateErr) {
+      log.warn('import:gamification:state-update-failed', { error: String(stateErr) });
+      // Fallback на rehydrate
+      try {
+        useGamificationStore.persist.rehydrate();
+        log.info('import:gamification:rehydrated-fallback');
+      } catch (rehydrateErr) {
+        log.warn('import:gamification:rehydrate-failed', { error: String(rehydrateErr) });
+      }
+    }
+    
+    log.info('import:gamification:done');
+  } catch (err) {
+    log.warn('import:gamification:failed', { error: String(err) });
+  }
 }
 
 export async function getBackupData(): Promise<BackupData> {
@@ -48,6 +161,88 @@ export async function getBackupData(): Promise<BackupData> {
     console.warn('Не удалось экспортировать данные геймификации:', err);
   }
   
+  // Экспортируем данные wellbeing
+  let wellbeing: BackupData['wellbeing'] = undefined;
+  try {
+    const rawData = localStorage.getItem('WB_RAW_BY_DAY');
+    const dailyData = localStorage.getItem('WB_DAY_AVG_BY_DAY');
+    const monthlyData = localStorage.getItem('WB_MONTH_AVG_BY_MONTH');
+    if (rawData || dailyData || monthlyData) {
+      wellbeing = {
+        raw: rawData ? JSON.parse(rawData) : undefined,
+        daily: dailyData ? JSON.parse(dailyData) : undefined,
+        monthly: monthlyData ? JSON.parse(monthlyData) : undefined,
+      };
+    }
+  } catch (err) {
+    console.warn('Не удалось экспортировать данные wellbeing:', err);
+  }
+  
+  // Экспортируем данные ассистента
+  let assistant: BackupData['assistant'] = undefined;
+  try {
+    const savedInfo = localStorage.getItem('ASSISTANT_SAVED_INFO_V1');
+    const prompt = localStorage.getItem('ASSISTANT_PROMPT_V1');
+    const textProvider = localStorage.getItem('ASSISTANT_TEXT_PROVIDER_V1');
+    const mode = localStorage.getItem('ASSISTANT_MODE_V1');
+    
+    // Собираем все сообщения ассистента
+    const messages: Record<string, unknown> = {};
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith('ASSISTANT_MESSAGES_V2:')) {
+        const dateKey = key.replace('ASSISTANT_MESSAGES_V2:', '');
+        const value = localStorage.getItem(key);
+        if (value) {
+          try {
+            messages[dateKey] = JSON.parse(value);
+          } catch { /* skip invalid */ }
+        }
+      }
+    }
+    
+    if (savedInfo || prompt || textProvider || mode || Object.keys(messages).length > 0) {
+      assistant = {
+        savedInfo: savedInfo || undefined,
+        prompt: prompt || undefined,
+        textProvider: textProvider || undefined,
+        mode: mode || undefined,
+        messages: Object.keys(messages).length > 0 ? messages : undefined,
+      };
+    }
+  } catch (err) {
+    console.warn('Не удалось экспортировать данные ассистента:', err);
+  }
+  
+  // Экспортируем все остальные данные из localStorage
+  const localStorageExtra: Record<string, string> = {};
+  try {
+    const knownKeys = new Set([
+      'GAMIFICATION_STATE_V1',
+      'WB_RAW_BY_DAY',
+      'WB_DAY_AVG_BY_DAY',
+      'WB_MONTH_AVG_BY_MONTH',
+      'ASSISTANT_SAVED_INFO_V1',
+      'ASSISTANT_PROMPT_V1',
+      'ASSISTANT_TEXT_PROVIDER_V1',
+      'ASSISTANT_MODE_V1',
+      'LOG_LEVEL',
+      'DEBUG_DIAG',
+    ]);
+    
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && !knownKeys.has(key) && !key.startsWith('ASSISTANT_MESSAGES_V2:') && !key.startsWith('img:')) {
+        const value = localStorage.getItem(key);
+        if (value !== null) {
+          localStorageExtra[key] = value;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Не удалось экспортировать дополнительные данные localStorage:', err);
+  }
+  
   const data: BackupData = {
     $schema: 'https://example.local/detective-board/backup.schema.json',
     version: 1,
@@ -60,6 +255,9 @@ export async function getBackupData(): Promise<BackupData> {
     games,
     purchases,
     gamification,
+    wellbeing,
+    assistant,
+    localStorageExtra: Object.keys(localStorageExtra).length > 0 ? localStorageExtra : undefined,
   };
   return data;
 }
@@ -83,6 +281,10 @@ export async function exportBackup(): Promise<void> {
       movies: data.movies.length,
       games: data.games.length,
       purchases: data.purchases.length,
+      hasGamification: !!data.gamification,
+      hasWellbeing: !!data.wellbeing,
+      hasAssistant: !!data.assistant,
+      extraKeys: data.localStorageExtra ? Object.keys(data.localStorageExtra).length : 0,
     });
   } finally {
     URL.revokeObjectURL(url);
@@ -97,6 +299,7 @@ export async function importBackup(file: File, mode: 'replace' | 'merge' = 'repl
   if (!data || data.version !== 1 || !Array.isArray(data.nodes) || !Array.isArray(data.links)) {
     throw new Error('Неподдерживаемый формат бэкапа');
   }
+  
   const nodes = data.nodes as AnyNode[];
   const links = data.links as LinkThread[];
   const users = Array.isArray(data.users) ? (data.users as User[]) : [];
@@ -105,13 +308,59 @@ export async function importBackup(file: File, mode: 'replace' | 'merge' = 'repl
   const games = Array.isArray(data.games) ? (data.games as GameItem[]) : [];
   const purchases = Array.isArray(data.purchases) ? (data.purchases as PurchaseItem[]) : [];
   
-  // Импортируем данные геймификации в localStorage
-  if (data.gamification !== undefined) {
+  // Импортируем данные wellbeing в localStorage
+  if (data.wellbeing) {
     try {
-      localStorage.setItem('GAMIFICATION_STATE_V1', JSON.stringify(data.gamification));
-      log.info('import:gamification:done');
+      if (data.wellbeing.raw !== undefined) {
+        localStorage.setItem('WB_RAW_BY_DAY', JSON.stringify(data.wellbeing.raw));
+      }
+      if (data.wellbeing.daily !== undefined) {
+        localStorage.setItem('WB_DAY_AVG_BY_DAY', JSON.stringify(data.wellbeing.daily));
+      }
+      if (data.wellbeing.monthly !== undefined) {
+        localStorage.setItem('WB_MONTH_AVG_BY_MONTH', JSON.stringify(data.wellbeing.monthly));
+      }
+      log.info('import:wellbeing:done');
     } catch (err) {
-      console.warn('Не удалось импортировать данные геймификации:', err);
+      console.warn('Не удалось импортировать данные wellbeing:', err);
+    }
+  }
+  
+  // Импортируем данные ассистента в localStorage
+  if (data.assistant) {
+    try {
+      if (data.assistant.savedInfo !== undefined) {
+        localStorage.setItem('ASSISTANT_SAVED_INFO_V1', data.assistant.savedInfo);
+      }
+      if (data.assistant.prompt !== undefined) {
+        localStorage.setItem('ASSISTANT_PROMPT_V1', data.assistant.prompt);
+      }
+      if (data.assistant.textProvider !== undefined) {
+        localStorage.setItem('ASSISTANT_TEXT_PROVIDER_V1', data.assistant.textProvider);
+      }
+      if (data.assistant.mode !== undefined) {
+        localStorage.setItem('ASSISTANT_MODE_V1', data.assistant.mode);
+      }
+      if (data.assistant.messages) {
+        for (const [dateKey, messages] of Object.entries(data.assistant.messages)) {
+          localStorage.setItem(`ASSISTANT_MESSAGES_V2:${dateKey}`, JSON.stringify(messages));
+        }
+      }
+      log.info('import:assistant:done');
+    } catch (err) {
+      console.warn('Не удалось импортировать данные ассистента:', err);
+    }
+  }
+  
+  // Импортируем все остальные данные в localStorage
+  if (data.localStorageExtra) {
+    try {
+      for (const [key, value] of Object.entries(data.localStorageExtra)) {
+        localStorage.setItem(key, value);
+      }
+      log.info('import:localStorage-extra:done', { keys: Object.keys(data.localStorageExtra).length });
+    } catch (err) {
+      console.warn('Не удалось импортировать дополнительные данные localStorage:', err);
     }
   }
 
@@ -142,6 +391,10 @@ export async function importBackup(file: File, mode: 'replace' | 'merge' = 'repl
       historyFuture: [],
       currentParentId: null,
     });
+    
+    // Импортируем данные геймификации ПОСЛЕ импорта данных в БД
+    await importGamificationData(data.gamification, nodes, books, movies, games, purchases);
+    
     log.info('import:replace:done', { nodes: nodes.length, links: links.length, users: users.length, books: books.length, movies: movies.length, games: games.length, purchases: purchases.length });
   } else {
     // merge: просто дозаписываем id-совместимые сущности, конфликты по id заменяются (put)
@@ -166,6 +419,16 @@ export async function importBackup(file: File, mode: 'replace' | 'merge' = 'repl
       historyFuture: [],
       currentParentId: s.currentParentId,
     }));
+    
+    // Импортируем данные геймификации ПОСЛЕ импорта данных в БД
+    const [books2, movies2, games2, purchases2] = await Promise.all([
+      db.books.toArray(),
+      db.movies.toArray(),
+      db.games.toArray(),
+      db.purchases.toArray(),
+    ]);
+    await importGamificationData(data.gamification, n2, books2, movies2, games2, purchases2);
+    
     log.info('import:merge:done', { nodes: nodes.length, links: links.length, users: users.length, books: books.length, movies: movies.length, games: games.length, purchases: purchases.length });
   }
 }
