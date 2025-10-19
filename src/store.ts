@@ -270,8 +270,26 @@ export const useAppStore = create<AppState>((set, get) => ({
           log.info('init:seeded', { nodes: 3, links: links.length, users: users.length });
         }
       } else {
-        set({ nodes: nodesCopy, links, users, initialized: true });
-        log.info('init:loaded', { nodes: nodesCopy.length, links: links.length, users: users.length });
+        // Восстановить текущий уровень вложенности из localStorage
+        let restoredParentId: string | null = null;
+        try {
+          const savedParentId = localStorage.getItem('DETECTIVE_BOARD_CURRENT_GROUP');
+          if (savedParentId && savedParentId !== 'null') {
+            // Проверяем, что группа существует
+            const groupExists = nodesCopy.find((n) => n.id === savedParentId && n.type === 'group');
+            if (groupExists) {
+              restoredParentId = savedParentId;
+              log.info('init:restored-group', { groupId: savedParentId });
+            } else {
+              log.warn('init:saved-group-not-found', { groupId: savedParentId });
+            }
+          }
+        } catch (err) {
+          log.warn('init:restore-group-failed', { error: String(err instanceof Error ? err.message : err) });
+        }
+        
+        set({ nodes: nodesCopy, links, users, initialized: true, currentParentId: restoredParentId });
+        log.info('init:loaded', { nodes: nodesCopy.length, links: links.length, users: users.length, currentParentId: restoredParentId });
       }
     } catch (err) {
       // Fallback to in-memory state (no persistence)
@@ -349,7 +367,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     await db.users.clear();
     await db.books.clear();
     await db.movies.clear();
-    set({ nodes: [], links: [], users: [], selection: [], linkSelection: [], historyPast: [], historyFuture: [] });
+    set({ nodes: [], links: [], users: [], selection: [], linkSelection: [], historyPast: [], historyFuture: [], currentParentId: null });
+    // Очистить сохраненный уровень из localStorage
+    try {
+      localStorage.removeItem('DETECTIVE_BOARD_CURRENT_GROUP');
+    } catch (err) {
+      log.warn('resetAll:clear-localStorage-failed', { error: String(err instanceof Error ? err.message : err) });
+    }
     log.warn('resetAll:done');
   },
 
@@ -674,6 +698,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       levelView: { ...s.levelView, [currKey]: saved },
       viewport: nextVp ? { ...nextVp } : s.viewport,
     }));
+    // Сохранить текущий уровень в localStorage
+    try {
+      localStorage.setItem('DETECTIVE_BOARD_CURRENT_GROUP', id);
+    } catch (err) {
+      log.warn('enterGroup:save-failed', { error: String(err instanceof Error ? err.message : err) });
+    }
     log.info('enterGroup', { id });
   },
   goUp: () => {
@@ -692,6 +722,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       levelView: { ...s.levelView, [currKey]: saved },
       viewport: nextVp ? { ...nextVp } : s.viewport,
     }));
+    // Сохранить текущий уровень в localStorage
+    try {
+      localStorage.setItem('DETECTIVE_BOARD_CURRENT_GROUP', parentId === null ? 'null' : parentId);
+    } catch (err) {
+      log.warn('goUp:save-failed', { error: String(err instanceof Error ? err.message : err) });
+    }
     log.info('goUp', { from: curr, to: parentId });
   },
   revealNode: (id) => {
@@ -703,6 +739,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       return p ?? null;
     })();
     set({ currentParentId: parentId });
+    // Сохранить текущий уровень в localStorage
+    try {
+      localStorage.setItem('DETECTIVE_BOARD_CURRENT_GROUP', parentId === null ? 'null' : parentId);
+    } catch (err) {
+      log.warn('revealNode:save-failed', { error: String(err instanceof Error ? err.message : err) });
+    }
     log.info('revealNode', { id, parentId });
   },
 
@@ -723,6 +765,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     await db.nodes.bulkAdd(get().nodes);
     await db.links.clear();
     await db.links.bulkAdd(get().links);
+    // Сохранить восстановленный уровень в localStorage
+    try {
+      localStorage.setItem('DETECTIVE_BOARD_CURRENT_GROUP', prev.currentParentId === null ? 'null' : prev.currentParentId);
+    } catch (err) {
+      log.warn('undo:save-failed', { error: String(err instanceof Error ? err.message : err) });
+    }
     log.info('undo');
   },
   redo: async () => {
@@ -742,6 +790,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     await db.nodes.bulkAdd(get().nodes);
     await db.links.clear();
     await db.links.bulkAdd(get().links);
+    // Сохранить восстановленный уровень в localStorage
+    try {
+      localStorage.setItem('DETECTIVE_BOARD_CURRENT_GROUP', next.currentParentId === null ? 'null' : next.currentParentId);
+    } catch (err) {
+      log.warn('redo:save-failed', { error: String(err instanceof Error ? err.message : err) });
+    }
     log.info('redo');
   },
 
