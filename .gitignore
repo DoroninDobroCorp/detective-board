@@ -33,3 +33,4 @@ coverage
 *.sw?
 env.local.playwright-browsers/
 .playwright-browsers/
+backups/*.tar.gz
