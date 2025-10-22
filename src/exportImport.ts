@@ -1,6 +1,6 @@
 import { db } from './db';
 import { getLogger } from './logger';
-import type { AnyNode, LinkThread, User, BookItem, MovieItem, GameItem, PurchaseItem } from './types';
+import type { AnyNode, LinkThread, User, BookItem, MovieItem, GameItem, PurchaseItem, DiaryEntry } from './types';
 import { useAppStore } from './store';
 import { buildAssistantContext, type AssistantContextData } from './assistant/context';
 import { loadMessages, loadPrompt, loadSavedInfo, todayKey } from './assistant/storage';
@@ -17,6 +17,7 @@ export type BackupData = {
   movies: MovieItem[];
   games: GameItem[];
   purchases: PurchaseItem[];
+  diary: DiaryEntry[];
   gamification?: unknown; // данные геймификации из localStorage
   wellbeing?: {
     raw?: unknown;
@@ -104,32 +105,37 @@ async function importGamificationData(
       log.info('import:gamification:auto-fix:processed-tasks', { added: addedCount });
     }
     
-    // Сохраняем в localStorage
-    localStorage.setItem('GAMIFICATION_STATE_V1', JSON.stringify(gamif));
+    // Сохраняем в localStorage с обёрткой zustand persist
+    const zustandFormat = {
+      state: gamif,
+      version: 0,
+    };
+    localStorage.setItem('GAMIFICATION_STATE_V1', JSON.stringify(zustandFormat));
     
-    // Принудительно обновляем zustand store напрямую
+    // Принудительно перезагружаем zustand store из localStorage
     try {
-      useGamificationStore.setState({
-        xp: gamif.xp || 0,
-        level: gamif.level || 1,
-        xpHistory: gamif.xpHistory || [],
-        completions: gamif.completions || [],
-        processedTasks: gamif.processedTasks || {},
-        achievements: gamif.achievements || [],
-        levelTitles: gamif.levelTitles || { 1: { title: 'Новичок', assignedAt: Date.now() } },
-        claimedBonuses: gamif.claimedBonuses || {},
-        pendingLevelUps: gamif.pendingLevelUps || [],
-        pendingManualCandidates: gamif.pendingManualCandidates || [],
-      });
-      log.info('import:gamification:state-updated');
-    } catch (stateErr) {
-      log.warn('import:gamification:state-update-failed', { error: String(stateErr) });
-      // Fallback на rehydrate
+      // Используем rehydrate чтобы загрузить из localStorage с правильной обёрткой
+      await useGamificationStore.persist.rehydrate();
+      log.info('import:gamification:rehydrated');
+    } catch (rehydrateErr) {
+      log.warn('import:gamification:rehydrate-failed', { error: String(rehydrateErr) });
+      // Fallback: устанавливаем напрямую
       try {
-        useGamificationStore.persist.rehydrate();
-        log.info('import:gamification:rehydrated-fallback');
-      } catch (rehydrateErr) {
-        log.warn('import:gamification:rehydrate-failed', { error: String(rehydrateErr) });
+        useGamificationStore.setState({
+          xp: gamif.xp || 0,
+          level: gamif.level || 1,
+          xpHistory: gamif.xpHistory || [],
+          completions: gamif.completions || [],
+          processedTasks: gamif.processedTasks || {},
+          achievements: gamif.achievements || [],
+          levelTitles: gamif.levelTitles || { 1: { title: 'Новичок', assignedAt: Date.now() } },
+          claimedBonuses: gamif.claimedBonuses || {},
+          pendingLevelUps: gamif.pendingLevelUps || [],
+          pendingManualCandidates: gamif.pendingManualCandidates || [],
+        });
+        log.info('import:gamification:state-updated-fallback');
+      } catch (stateErr) {
+        log.warn('import:gamification:state-update-failed', { error: String(stateErr) });
       }
     }
     
@@ -140,7 +146,7 @@ async function importGamificationData(
 }
 
 export async function getBackupData(): Promise<BackupData> {
-  const [nodes, links, users, books, movies, games, purchases] = await Promise.all([
+  const [nodes, links, users, books, movies, games, purchases, diary] = await Promise.all([
     db.nodes.toArray(),
     db.links.toArray(),
     db.users.toArray(),
@@ -148,6 +154,7 @@ export async function getBackupData(): Promise<BackupData> {
     db.movies.toArray(),
     db.games.toArray(),
     db.purchases.toArray(),
+    db.diary.toArray(),
   ]);
   
   // Экспортируем данные геймификации из localStorage
@@ -155,7 +162,9 @@ export async function getBackupData(): Promise<BackupData> {
   try {
     const gamificationRaw = localStorage.getItem('GAMIFICATION_STATE_V1');
     if (gamificationRaw) {
-      gamification = JSON.parse(gamificationRaw);
+      const parsed = JSON.parse(gamificationRaw);
+      // Zustand persist wraps data in {state: {...}, version: ...}, extract the state
+      gamification = parsed.state || parsed;
     }
   } catch (err) {
     console.warn('Не удалось экспортировать данные геймификации:', err);
@@ -232,7 +241,7 @@ export async function getBackupData(): Promise<BackupData> {
     
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
-      if (key && !knownKeys.has(key) && !key.startsWith('ASSISTANT_MESSAGES_V2:') && !key.startsWith('img:')) {
+      if (key && !knownKeys.has(key) && !key.startsWith('ASSISTANT_MESSAGES_V2:')) {
         const value = localStorage.getItem(key);
         if (value !== null) {
           localStorageExtra[key] = value;
@@ -254,6 +263,7 @@ export async function getBackupData(): Promise<BackupData> {
     movies,
     games,
     purchases,
+    diary,
     gamification,
     wellbeing,
     assistant,
@@ -281,6 +291,7 @@ export async function exportBackup(): Promise<void> {
       movies: data.movies.length,
       games: data.games.length,
       purchases: data.purchases.length,
+      diary: data.diary.length,
       hasGamification: !!data.gamification,
       hasWellbeing: !!data.wellbeing,
       hasAssistant: !!data.assistant,
@@ -307,6 +318,7 @@ export async function importBackup(file: File, mode: 'replace' | 'merge' = 'repl
   const movies = Array.isArray(data.movies) ? (data.movies as MovieItem[]) : [];
   const games = Array.isArray(data.games) ? (data.games as GameItem[]) : [];
   const purchases = Array.isArray(data.purchases) ? (data.purchases as PurchaseItem[]) : [];
+  const diary = Array.isArray(data.diary) ? (data.diary as DiaryEntry[]) : [];
   
   // Импортируем данные wellbeing в localStorage
   if (data.wellbeing) {
@@ -365,7 +377,7 @@ export async function importBackup(file: File, mode: 'replace' | 'merge' = 'repl
   }
 
   if (mode === 'replace') {
-    await db.transaction('rw', [db.nodes, db.links, db.users, db.books, db.movies, db.games, db.purchases], async () => {
+    await db.transaction('rw', [db.nodes, db.links, db.users, db.books, db.movies, db.games, db.purchases, db.diary], async () => {
       await db.nodes.clear();
       await db.links.clear();
       await db.users.clear();
@@ -373,6 +385,7 @@ export async function importBackup(file: File, mode: 'replace' | 'merge' = 'repl
       await db.movies.clear();
       await db.games.clear();
       await db.purchases.clear();
+      await db.diary.clear();
       if (nodes.length) await db.nodes.bulkAdd(nodes);
       if (links.length) await db.links.bulkAdd(links);
       if (users.length) await db.users.bulkAdd(users);
@@ -380,6 +393,7 @@ export async function importBackup(file: File, mode: 'replace' | 'merge' = 'repl
       if (movies.length) await db.movies.bulkAdd(movies);
       if (games.length) await db.games.bulkAdd(games);
       if (purchases.length) await db.purchases.bulkAdd(purchases);
+      if (diary.length) await db.diary.bulkAdd(diary);
     });
     useAppStore.setState({
       nodes,
@@ -395,10 +409,10 @@ export async function importBackup(file: File, mode: 'replace' | 'merge' = 'repl
     // Импортируем данные геймификации ПОСЛЕ импорта данных в БД
     await importGamificationData(data.gamification, nodes, books, movies, games, purchases);
     
-    log.info('import:replace:done', { nodes: nodes.length, links: links.length, users: users.length, books: books.length, movies: movies.length, games: games.length, purchases: purchases.length });
+    log.info('import:replace:done', { nodes: nodes.length, links: links.length, users: users.length, books: books.length, movies: movies.length, games: games.length, purchases: purchases.length, diary: diary.length });
   } else {
     // merge: просто дозаписываем id-совместимые сущности, конфликты по id заменяются (put)
-    await db.transaction('rw', [db.nodes, db.links, db.users, db.books, db.movies, db.games, db.purchases], async () => {
+    await db.transaction('rw', [db.nodes, db.links, db.users, db.books, db.movies, db.games, db.purchases, db.diary], async () => {
       if (nodes.length) await db.nodes.bulkPut(nodes);
       if (links.length) await db.links.bulkPut(links);
       if (users.length) await db.users.bulkPut(users);
@@ -406,6 +420,7 @@ export async function importBackup(file: File, mode: 'replace' | 'merge' = 'repl
       if (movies.length) await db.movies.bulkPut(movies);
       if (games.length) await db.games.bulkPut(games);
       if (purchases.length) await db.purchases.bulkPut(purchases);
+      if (diary.length) await db.diary.bulkPut(diary);
     });
     // синхронизируем стор с БД
     const [n2, l2, u2] = await Promise.all([db.nodes.toArray(), db.links.toArray(), db.users.toArray()]);
@@ -429,7 +444,7 @@ export async function importBackup(file: File, mode: 'replace' | 'merge' = 'repl
     ]);
     await importGamificationData(data.gamification, n2, books2, movies2, games2, purchases2);
     
-    log.info('import:merge:done', { nodes: nodes.length, links: links.length, users: users.length, books: books.length, movies: movies.length, games: games.length, purchases: purchases.length });
+    log.info('import:merge:done', { nodes: nodes.length, links: links.length, users: users.length, books: books.length, movies: movies.length, games: games.length, purchases: purchases.length, diary: diary.length });
   }
 }
 

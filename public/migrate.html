@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Миграция данных - Detective Board</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 800px;
+      margin: 50px auto;
+      padding: 20px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+    .container {
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(10px);
+      border-radius: 16px;
+      padding: 40px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+    }
+    h1 { margin-top: 0; font-size: 2em; }
+    .status {
+      background: rgba(255, 255, 255, 0.2);
+      padding: 20px;
+      border-radius: 8px;
+      margin: 20px 0;
+      font-family: 'Courier New', monospace;
+      font-size: 14px;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    .success { color: #4ade80; }
+    .error { color: #f87171; }
+    .warning { color: #fbbf24; }
+    .info { color: #60a5fa; }
+    button {
+      background: white;
+      color: #667eea;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-right: 10px;
+      margin-top: 10px;
+    }
+    button:hover { background: #f0f0f0; }
+    button:disabled {
+      background: #ccc;
+      color: #666;
+      cursor: not-allowed;
+    }
+    .progress {
+      width: 100%;
+      height: 8px;
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 4px;
+      overflow: hidden;
+      margin: 20px 0;
+    }
+    .progress-bar {
+      height: 100%;
+      background: linear-gradient(90deg, #4ade80, #60a5fa);
+      width: 0%;
+      transition: width 0.3s ease;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔄 Автоматическая миграция данных</h1>
+    <p>Эта страница автоматически перенесёт все ваши данные на новый путь.</p>
+    
+    <div class="progress">
+      <div class="progress-bar" id="progress"></div>
+    </div>
+    
+    <div class="status" id="log"></div>
+    
+    <div>
+      <button id="startBtn" onclick="startMigration()">🚀 Начать миграцию</button>
+      <button id="skipBtn" onclick="skipMigration()" style="background: transparent; color: white; border: 1px solid white;">Пропустить</button>
+    </div>
+  </div>
+
+  <script type="module">
+    import Dexie from 'https://cdn.jsdelivr.net/npm/dexie@4.0.1/dist/modern/dexie.mjs';
+
+    const log = (msg, type = 'info') => {
+      const logEl = document.getElementById('log');
+      const time = new Date().toLocaleTimeString();
+      const className = type === 'error' ? 'error' : type === 'success' ? 'success' : type === 'warning' ? 'warning' : 'info';
+      logEl.innerHTML += `<div class="${className}">[${time}] ${msg}</div>`;
+      logEl.scrollTop = logEl.scrollHeight;
+      console.log(`[migration] ${msg}`);
+    };
+
+    const setProgress = (percent) => {
+      document.getElementById('progress').style.width = percent + '%';
+    };
+
+    window.startMigration = async () => {
+      const startBtn = document.getElementById('startBtn');
+      const skipBtn = document.getElementById('skipBtn');
+      startBtn.disabled = true;
+      skipBtn.disabled = true;
+
+      try {
+        log('📦 Открываю IndexedDB...', 'info');
+        setProgress(10);
+
+        // Open the database
+        const db = new Dexie('detective_board_db');
+        db.version(1).stores({
+          nodes: 'id, parentId, type, updatedAt',
+          links: 'id, fromId, toId',
+          users: 'id, name',
+        });
+        db.version(2).stores({
+          nodes: 'id, parentId, type, updatedAt',
+          links: 'id, fromId, toId',
+          users: 'id, name',
+          books: 'id, title, createdAt',
+          movies: 'id, title, createdAt',
+        });
+        db.version(3).stores({
+          nodes: 'id, parentId, type, updatedAt',
+          links: 'id, fromId, toId',
+          users: 'id, name',
+          books: 'id, title, createdAt',
+          movies: 'id, title, createdAt',
+          games: 'id, title, createdAt',
+        });
+        db.version(4).stores({
+          nodes: 'id, parentId, type, updatedAt',
+          links: 'id, fromId, toId',
+          users: 'id, name',
+          books: 'id, title, createdAt',
+          movies: 'id, title, createdAt',
+          games: 'id, title, createdAt',
+          purchases: 'id, title, createdAt',
+        });
+        db.version(5).stores({
+          nodes: 'id, parentId, type, updatedAt',
+          links: 'id, fromId, toId',
+          users: 'id, name',
+          books: 'id, title, createdAt',
+          movies: 'id, title, createdAt',
+          games: 'id, title, createdAt',
+          purchases: 'id, title, createdAt',
+          diary: 'id, date, createdAt',
+        });
+
+        await db.open();
+        log('✅ База данных открыта', 'success');
+        setProgress(20);
+
+        log('📥 Загружаю данные из IndexedDB...', 'info');
+        const [nodes, links, users, books, movies, games, purchases, diary] = await Promise.all([
+          db.table('nodes').toArray(),
+          db.table('links').toArray(),
+          db.table('users').toArray(),
+          db.table('books').toArray(),
+          db.table('movies').toArray(),
+          db.table('games').toArray(),
+          db.table('purchases').toArray(),
+          db.table('diary').toArray(),
+        ]);
+        
+        log(`✅ Загружено: ${nodes.length} задач, ${links.length} связей, ${users.length} пользователей`, 'success');
+        log(`✅ Загружено: ${books.length} книг, ${movies.length} фильмов, ${games.length} игр, ${purchases.length} покупок`, 'success');
+        log(`✅ Загружено: ${diary.length} записей дневника`, 'success');
+        setProgress(40);
+
+        // Export localStorage
+        log('📥 Загружаю данные из localStorage...', 'info');
+        const localStorageExtra = {};
+        const knownKeys = new Set([
+          'LOG_LEVEL', 'DEBUG_DIAG', 'SW_RELOAD_ONCE'
+        ]);
+        
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && !knownKeys.has(key)) {
+            localStorageExtra[key] = localStorage.getItem(key);
+          }
+        }
+        
+        log(`✅ Загружено ${Object.keys(localStorageExtra).length} ключей из localStorage`, 'success');
+        
+        // Extract specific data
+        let gamification = null;
+        try {
+          const gamifStr = localStorage.getItem('GAMIFICATION_STATE_V1');
+          if (gamifStr) {
+            gamification = JSON.parse(gamifStr);
+            log(`✅ Геймификация: уровень ${gamification.level}, XP ${gamification.xp}`, 'success');
+            log(`✅ Достижения: ${gamification.achievements?.length || 0}`, 'success');
+          }
+        } catch (e) {
+          log('⚠️ Не удалось загрузить данные геймификации', 'warning');
+        }
+
+        setProgress(60);
+
+        // Build backup data
+        const backupData = {
+          version: 1,
+          exportedAt: new Date().toISOString(),
+          nodes,
+          links,
+          users,
+          books,
+          movies,
+          games,
+          purchases,
+          diary,
+          gamification,
+          localStorageExtra: Object.keys(localStorageExtra).length > 0 ? localStorageExtra : undefined,
+        };
+
+        log('📤 Отправляю данные на сервер...', 'info');
+        const response = await fetch('/api/migration/export', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(backupData)
+        });
+
+        if (!response.ok) {
+          throw new Error(`Ошибка сервера: ${response.status}`);
+        }
+
+        const result = await response.json();
+        log('✅ Данные успешно отправлены на сервер!', 'success');
+        setProgress(80);
+
+        log('🎉 Миграция завершена! Перенаправляю на новый путь...', 'success');
+        setProgress(100);
+
+        setTimeout(() => {
+          window.location.href = '/detective-board/?auto-import=1';
+        }, 2000);
+
+      } catch (error) {
+        log(`❌ Ошибка миграции: ${error.message}`, 'error');
+        console.error('Migration error:', error);
+        startBtn.disabled = false;
+        skipBtn.disabled = false;
+      }
+    };
+
+    window.skipMigration = () => {
+      if (confirm('Вы уверены? Данные не будут перенесены.')) {
+        window.location.href = '/detective-board/';
+      }
+    };
+
+    // Auto-start if URL param is set
+    if (new URLSearchParams(location.search).get('auto') === '1') {
+      setTimeout(() => window.startMigration(), 1000);
+    }
+  </script>
+</body>
+</html>

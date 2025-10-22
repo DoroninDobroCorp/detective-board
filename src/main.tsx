@@ -125,7 +125,7 @@ log.info('app:start');
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <BrowserRouter>
+    <BrowserRouter basename="/detective-board">
       <ErrorBoundary>
         <App />
       </ErrorBoundary>

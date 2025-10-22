@@ -182,7 +182,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       async function tryBootstrapFromFile(): Promise<boolean> {
         try {
-          const res = await fetch('/bootstrap-backup.json', { cache: 'no-store' });
+          const res = await fetch(`${import.meta.env.BASE_URL}bootstrap-backup.json`, { cache: 'no-store' });
           if (!res.ok) return false;
           const data = await res.json();
           const nodesB = Array.isArray((data as any).nodes) ? (data as any).nodes : [];
@@ -296,7 +296,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       log.error('init:indexeddb-failed, using in-memory state', err);
       // Try to load a bootstrap backup into memory if available
       try {
-        const res = await fetch('/bootstrap-backup.json', { cache: 'no-store' });
+        const res = await fetch(`${import.meta.env.BASE_URL}bootstrap-backup.json`, { cache: 'no-store' });
         if (res.ok) {
           const data = await res.json();
           const nodesB = Array.isArray((data as any).nodes) ? (data as any).nodes : [];

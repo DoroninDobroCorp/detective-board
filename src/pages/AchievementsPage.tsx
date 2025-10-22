@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import {
   useGamificationStore,
   progressWithinLevel,
+  totalXpForLevel,
 } from '../gamification';
 import { computeWellbeingBonuses, ymd } from '../wellbeing';
 import { extractAssistantText } from '../assistant/api';
@@ -99,6 +100,8 @@ const AchievementsPage: React.FC = () => {
   const level = useGamificationStore((s) => s.level);
   const levelTitles = useGamificationStore((s) => s.levelTitles);
   const achievements = useGamificationStore((s) => s.achievements);
+  const completions = useGamificationStore((s) => s.completions);
+  const xpHistory = useGamificationStore((s) => s.xpHistory);
   const addAchievement = useGamificationStore((s) => s.addAchievement);
   const updateAchievement = useGamificationStore((s) => s.updateAchievement);
   const removeAchievement = useGamificationStore((s) => s.removeAchievement);
@@ -257,8 +260,13 @@ const AchievementsPage: React.FC = () => {
     <div className="achievements-page" style={{ padding: 24 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, gap: 12, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <Link to="/" className="tool-link">← Назад к доске</Link>
-          <h2 style={{ margin: 0 }}>Достижения и опыт</h2>
+          <div>
+            <Link to="/" className="tool-link">← Назад к доске</Link>
+            <h2 style={{ margin: '8px 0 0 0' }}>Достижения и опыт</h2>
+            <Link to="/level-titles" style={{ fontSize: 13, color: '#4fa3ff', textDecoration: 'none', display: 'inline-block', marginTop: 4 }}>
+              ✏️ Редактировать названия уровней
+            </Link>
+          </div>
         </div>
         <ExtrasSwitcher />
       </div>
@@ -272,6 +280,76 @@ const AchievementsPage: React.FC = () => {
           <div style={{ fontSize: 12, color: '#7f93a3' }}>{progress.current} / {progress.required}</div>
         </div>
         <div style={{ marginTop: 8, fontSize: 12, color: '#7f93a3' }}>Всего опыта: {xp}</div>
+      </section>
+
+      {/* Level History with Tasks */}
+      <section style={{ marginBottom: 32 }}>
+        <h3 style={{ fontSize: 18, fontWeight: 600, marginBottom: 16 }}>История уровней</h3>
+        {Array.from({ length: level }, (_, i) => level - i).map((lvl) => {
+          const lvlTitle = levelTitles[lvl]?.title || `Уровень ${lvl}`;
+          
+          // Sort xpHistory by timestamp to calculate accumulated XP correctly
+          const sortedHistory = [...xpHistory].sort((a, b) => a.ts - b.ts);
+          
+          // Calculate accumulated XP at each completion
+          const completionsWithXp = completions.map((c) => {
+            let accumulated = 0;
+            for (const entry of sortedHistory) {
+              if (entry.ts <= c.completedAt) {
+                accumulated += entry.amount;
+              } else {
+                break; // Since sorted, no need to continue
+              }
+            }
+            return { ...c, accumulatedXp: accumulated };
+          });
+          
+          const lvlThreshold = totalXpForLevel(lvl);
+          const nextLvlThreshold = totalXpForLevel(lvl + 1);
+          
+          const lvlCompletions = completionsWithXp.filter((c) => 
+            c.accumulatedXp > lvlThreshold && c.accumulatedXp <= nextLvlThreshold
+          );
+
+          return (
+            <details
+              key={lvl}
+              style={{
+                background: '#10181f',
+                padding: 16,
+                borderRadius: 12,
+                border: '1px solid #1f2b34',
+                marginBottom: 12,
+              }}
+              open={lvl === level}
+            >
+              <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: 16 }}>
+                🏆 {lvlTitle} — {lvlCompletions.length} задач{' '}
+                <span style={{ color: '#7f93a3', fontSize: 12 }}>
+                  ({totalXpForLevel(lvl)} - {totalXpForLevel(lvl + 1)} XP)
+                </span>
+              </summary>
+              {lvlCompletions.length > 0 ? (
+                <ul style={{ marginTop: 12, paddingLeft: 20, color: '#7f93a3', fontSize: 13 }}>
+                  {lvlCompletions.map((c) => (
+                    <li key={c.id} style={{ marginBottom: 6 }}>
+                      {c.iconEmoji && <span style={{ marginRight: 6 }}>{c.iconEmoji}</span>}
+                      {c.title}
+                      <span style={{ color: '#4fa3ff', marginLeft: 8 }}>+{c.xp} XP</span>
+                      {c.parentPath.length > 0 && (
+                        <span style={{ color: '#5a6d7e', marginLeft: 8, fontSize: 11 }}>
+                          ({c.parentPath.join(' → ')})
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p style={{ marginTop: 12, color: '#7f93a3', fontSize: 13 }}>Нет завершённых задач на этом уровне</p>
+              )}
+            </details>
+          );
+        })}
       </section>
       <section style={{ marginBottom: 32, background: '#10181f', padding: 16, borderRadius: 12, border: '1px solid #1f2b34' }}>
         <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>Бонус за самочувствие</div>

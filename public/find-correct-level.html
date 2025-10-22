@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Поиск правильного уровня</title>
+  <style>
+    body { font-family: Arial; padding: 20px; background: #1a1a1a; color: #0f0; }
+    h1 { color: #0ff; }
+    button { padding: 10px 20px; background: #0f0; color: #000; border: none; cursor: pointer; margin: 5px; }
+    pre { background: #000; padding: 15px; border-radius: 5px; overflow: auto; max-height: 400px; }
+    .box { background: #222; padding: 15px; margin: 10px 0; border-radius: 8px; border: 1px solid #0f0; }
+  </style>
+</head>
+<body>
+  <h1>🔍 Поиск правильных данных уровня</h1>
+  <p><strong>Текущий URL:</strong> <span id="url"></span></p>
+  
+  <div class="box">
+    <h2>Текущий localStorage</h2>
+    <button onclick="checkCurrent()">Проверить текущий</button>
+    <div id="current"></div>
+  </div>
+
+  <div class="box">
+    <h2>Восстановить уровень 9</h2>
+    <p>Если у тебя раньше был 9 уровень с 4650 XP, значит нужно пересчитать XP для каждой задачи.</p>
+    <p><strong>Вариант 1:</strong> Считать что задачи давали больше XP (не 100, а больше)</p>
+    <button onclick="recalcHigherXP()">Пересчитать с высокими XP</button>
+    <p><strong>Вариант 2:</strong> Использовать старую простую формулу уровней</p>
+    <button onclick="useOldFormula()">Использовать старую формулу</button>
+    <div id="output"></div>
+  </div>
+
+  <script>
+    document.getElementById('url').textContent = window.location.href;
+
+    function checkCurrent() {
+      const output = document.getElementById('current');
+      const raw = localStorage.getItem('GAMIFICATION_STATE_V1');
+      if (!raw) {
+        output.innerHTML = '<p style="color: red;">Нет данных</p>';
+        return;
+      }
+      
+      const parsed = JSON.parse(raw);
+      const state = parsed.state || parsed;
+      
+      output.innerHTML = `
+        <p><strong>Уровень:</strong> ${state.level}</p>
+        <p><strong>XP:</strong> ${state.xp}</p>
+        <p><strong>Completions:</strong> ${state.completions?.length || 0}</p>
+        <p><strong>XP History:</strong> ${state.xpHistory?.length || 0}</p>
+      `;
+    }
+
+    function recalcHigherXP() {
+      const output = document.getElementById('output');
+      output.innerHTML = '<p>Пересчитываю с учетом того что нужен уровень 9 для 4650 XP...</p>';
+      
+      // If level 9 with 4650 XP was correct with exponential formula,
+      // let's calculate what XP per task is needed
+      
+      // With current exponential formula:
+      // Level 9 threshold = sum of xpRequiredForNext(1..8)
+      function xpRequiredForNext(level) {
+        const base = 250;
+        const scale = 1.12;
+        const core = base * Math.pow(Math.max(level, 1), 1.35) + 180;
+        return Math.max(150, Math.round(core * scale));
+      }
+      
+      function totalXpForLevel(level) {
+        if (level <= 1) return 0;
+        let total = 0;
+        for (let i = 1; i < level; i++) {
+          total += xpRequiredForNext(i);
+        }
+        return total;
+      }
+      
+      const level9threshold = totalXpForLevel(9);
+      const level10threshold = totalXpForLevel(10);
+      
+      output.innerHTML += `<p>Уровень 9: ${level9threshold} - ${level10threshold} XP</p>`;
+      output.innerHTML += `<p>Твой XP: 4650</p>`;
+      
+      if (4650 >= level9threshold && 4650 < level10threshold) {
+        output.innerHTML += '<p style="color: #0f0;">✅ 4650 XP это ДЕЙСТВИТЕЛЬНО уровень 9!</p>';
+        output.innerHTML += '<p>Значит rebuild script работает правильно. Проблема в отображении задач!</p>';
+      } else {
+        const actualLevel = (() => {
+          let lvl = 1;
+          while (4650 >= totalXpForLevel(lvl + 1)) {
+            lvl++;
+            if (lvl > 999) break;
+          }
+          return lvl;
+        })();
+        
+        output.innerHTML += `<p style="color: #ff0;">⚠️ 4650 XP это уровень ${actualLevel}, а не 9</p>`;
+        
+        // Calculate needed XP
+        const needed = level9threshold;
+        const tasksCount = 42; // from summary
+        const avgXpNeeded = Math.ceil(needed / tasksCount);
+        
+        output.innerHTML += `<p>Чтобы достичь уровня 9, нужно ${needed} XP</p>`;
+        output.innerHTML += `<p>У тебя ${tasksCount} задач, значит в среднем по ${avgXpNeeded} XP на задачу</p>`;
+        output.innerHTML += `<p>Сейчас дают по 100 XP</p>`;
+      }
+    }
+
+    function useOldFormula() {
+      const output = document.getElementById('output');
+      output.innerHTML = '<p>Проверяю старую формулу (100 * level)...</p>';
+      
+      // Old simple formula
+      function oldTotalXpForLevel(level) {
+        if (level <= 1) return 0;
+        let total = 0;
+        for (let i = 2; i <= level; i++) {
+          total += 100 * i;
+        }
+        return total;
+      }
+      
+      function oldLevelForXp(xp) {
+        let level = 1;
+        while (xp >= oldTotalXpForLevel(level + 1)) {
+          level++;
+        }
+        return level;
+      }
+      
+      const level = oldLevelForXp(4650);
+      const threshold = oldTotalXpForLevel(level);
+      const next = oldTotalXpForLevel(level + 1);
+      
+      output.innerHTML += `<p><strong>Со старой формулой:</strong></p>`;
+      output.innerHTML += `<p>4650 XP = Уровень ${level}</p>`;
+      output.innerHTML += `<p>Порог: ${threshold} - ${next}</p>`;
+      output.innerHTML += `<p>Прогресс: ${4650 - threshold} / ${next - threshold}</p>`;
+      
+      if (level === 9) {
+        output.innerHTML += '<p style="color: #0f0;">✅ Это оно! Старая формула давала уровень 9!</p>';
+        output.innerHTML += '<p><strong>Решение:</strong> Откатить на старую формулу или увеличить XP за задачи</p>';
+      }
+    }
+
+    // Auto-check
+    setTimeout(() => {
+      checkCurrent();
+      recalcHigherXP();
+    }, 500);
+  </script>
+</body>
+</html>

@@ -304,8 +304,10 @@ export default defineConfig(({ mode }) => {
   const TELEGRAM_BOT_TOKEN = env.TELEGRAM_BOT_TOKEN;
 
   return {
+    base: '/detective-board/',
     server: {
       middlewareMode: false,
+      allowedHosts: ['ibet.team', 'localhost'],
     },
     plugins: [
       react(),
@@ -496,6 +498,70 @@ export default defineConfig(({ mode }) => {
               res.setHeader('Content-Type', 'application/json');
               res.end(JSON.stringify({ error: 'Серверная ошибка при обращении к OpenAI', message: e instanceof Error ? e.message : String(e) }));
             }
+          });
+
+          // Data migration endpoints
+          let migrationData: any = null;
+
+          server.middlewares.use('/api/migration/export', async (req, res) => {
+            if (req.method !== 'POST') { res.statusCode = 405; res.end('Method Not Allowed'); return; }
+            try {
+              const chunks: Uint8Array[] = [];
+              req.on('data', (c: Uint8Array) => chunks.push(c));
+              await new Promise<void>((resolve) => req.on('end', () => resolve()));
+              const bodyStr = Buffer.concat(chunks).toString('utf8');
+              const data = JSON.parse(bodyStr);
+              
+              // Store data in memory
+              migrationData = data;
+              console.log('[migration] Data stored:', {
+                nodes: data.nodes?.length,
+                diary: data.diary?.length,
+                gamification: !!data.gamification,
+                localStorageKeys: data.localStorageExtra ? Object.keys(data.localStorageExtra).length : 0
+              });
+              
+              res.statusCode = 200;
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ success: true, stored: Date.now() }));
+            } catch (e) {
+              console.error('[migration] Export failed:', e);
+              res.statusCode = 500;
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ error: String(e) }));
+            }
+          });
+
+          server.middlewares.use('/api/migration/import', async (req, res) => {
+            if (req.method !== 'GET') { res.statusCode = 405; res.end('Method Not Allowed'); return; }
+            try {
+              if (!migrationData) {
+                res.statusCode = 404;
+                res.setHeader('Content-Type', 'application/json');
+                res.end(JSON.stringify({ error: 'No migration data available' }));
+                return;
+              }
+              
+              console.log('[migration] Data retrieved');
+              res.statusCode = 200;
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify(migrationData));
+            } catch (e) {
+              console.error('[migration] Import failed:', e);
+              res.statusCode = 500;
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ error: String(e) }));
+            }
+          });
+
+          server.middlewares.use('/api/migration/status', async (req, res) => {
+            if (req.method !== 'GET') { res.statusCode = 405; res.end('Method Not Allowed'); return; }
+            res.statusCode = 200;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ 
+              hasMigrationData: !!migrationData,
+              timestamp: migrationData ? Date.now() : null
+            }));
           });
 
           // ... (остальные middleware)

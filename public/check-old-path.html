@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Проверка старого пути</title>
+  <style>
+    body { font-family: Arial; max-width: 800px; margin: 50px auto; padding: 20px; background: #f5f5f5; }
+    h1 { color: #333; }
+    button { padding: 15px 30px; font-size: 18px; cursor: pointer; background: #4CAF50; color: white; border: none; border-radius: 5px; margin: 10px 5px; }
+    button:hover { background: #45a049; }
+    .status { margin-top: 20px; padding: 20px; background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .good { color: #4CAF50; font-weight: bold; }
+    .bad { color: #f44336; font-weight: bold; }
+    pre { background: #f9f9f9; padding: 15px; border-radius: 5px; overflow-x: auto; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>🔍 Проверка localStorage по старому пути</h1>
+  <p>Эта страница проверяет localStorage БЕЗ base path /detective-board</p>
+  <p><strong>URL:</strong> <span id="url"></span></p>
+  
+  <button onclick="checkLocalStorage()">🔎 Проверить localStorage</button>
+  <button onclick="transferData()" style="background: #FF9800;">🔄 Перенести данные на новый путь</button>
+  
+  <div id="status" class="status" style="display:none;"></div>
+
+  <script>
+    document.getElementById('url').textContent = window.location.href;
+
+    window.checkLocalStorage = function() {
+      const statusEl = document.getElementById('status');
+      statusEl.style.display = 'block';
+
+      let html = '<h2>📊 localStorage данные:</h2>';
+      html += '<div style="font-size: 16px; line-height: 1.8;">';
+
+      // Check gamification
+      const gamifRaw = localStorage.getItem('GAMIFICATION_STATE_V1');
+      if (gamifRaw) {
+        try {
+          const parsed = JSON.parse(gamifRaw);
+          const gamif = parsed.state || parsed;
+          
+          html += '<h3 style="color: #4CAF50;">✅ НАЙДЕНА ГЕЙМИФИКАЦИЯ!</h3>';
+          html += `<strong>Уровень:</strong> <span class="good">${gamif.level || 1}</span><br>`;
+          html += `<strong>XP:</strong> <span class="good">${gamif.xp || 0}</span><br>`;
+          html += `<strong>Достижения:</strong> <span class="good">${gamif.achievements?.length || 0}</span><br>`;
+          html += `<strong>Названия уровней:</strong> ${Object.keys(gamif.levelTitles || {}).join(', ')}<br>`;
+          html += `<strong>XP история:</strong> ${gamif.xpHistory?.length || 0} записей<br>`;
+          html += '<br>';
+        } catch (e) {
+          html += '<p style="color: red;">Ошибка парсинга геймификации: ' + e.message + '</p>';
+        }
+      } else {
+        html += '<p style="color: #f44336;">❌ Геймификация не найдена</p>';
+      }
+
+      // Check wellbeing
+      const wbRaw = localStorage.getItem('WB_RAW_BY_DAY');
+      const wbDaily = localStorage.getItem('WB_DAY_AVG_BY_DAY');
+      const wbMonthly = localStorage.getItem('WB_MONTH_AVG_BY_MONTH');
+      
+      if (wbRaw || wbDaily || wbMonthly) {
+        html += '<h3 style="color: #4CAF50;">✅ НАЙДЕН WELLBEING!</h3>';
+        if (wbRaw) {
+          try {
+            const parsed = JSON.parse(wbRaw);
+            const days = Object.keys(parsed).length;
+            html += `<strong>Сырые данные:</strong> ${days} дней<br>`;
+          } catch (e) {}
+        }
+        if (wbDaily) {
+          try {
+            const parsed = JSON.parse(wbDaily);
+            const days = Object.keys(parsed).length;
+            html += `<strong>Дневные средние:</strong> ${days} дней<br>`;
+          } catch (e) {}
+        }
+        if (wbMonthly) {
+          try {
+            const parsed = JSON.parse(wbMonthly);
+            const months = Object.keys(parsed).length;
+            html += `<strong>Месячные средние:</strong> ${months} месяцев<br>`;
+          } catch (e) {}
+        }
+        html += '<br>';
+      }
+
+      // Check images
+      const imgKeys = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key?.startsWith('img:')) imgKeys.push(key);
+      }
+      
+      if (imgKeys.length > 0) {
+        html += `<h3 style="color: #4CAF50;">✅ НАЙДЕНЫ КАРТИНКИ: ${imgKeys.length}</h3>`;
+      }
+
+      // Show all keys
+      html += '<h3>Все ключи localStorage:</h3><pre>';
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key) {
+          const value = localStorage.getItem(key);
+          const size = value ? (value.length / 1024).toFixed(2) : '0';
+          html += `${key} (${size} KB)\n`;
+        }
+      }
+      html += '</pre>';
+
+      html += '</div>';
+      statusEl.innerHTML = html;
+    };
+
+    window.transferData = async function() {
+      const statusEl = document.getElementById('status');
+      statusEl.innerHTML = '<h3>🔄 Переношу данные...</h3>';
+
+      // Collect all localStorage
+      const allData = {};
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key) {
+          allData[key] = localStorage.getItem(key);
+        }
+      }
+
+      try {
+        // Send to migration endpoint
+        const backup = {
+          version: 1,
+          exportedAt: new Date().toISOString(),
+          nodes: [], // Will be filled from IndexedDB on new path
+          links: [],
+          users: [],
+          books: [],
+          movies: [],
+          games: [],
+          purchases: [],
+          diary: [],
+          localStorageExtra: allData,
+        };
+
+        // Extract gamification
+        if (allData.GAMIFICATION_STATE_V1) {
+          try {
+            const parsed = JSON.parse(allData.GAMIFICATION_STATE_V1);
+            backup.gamification = parsed.state || parsed;
+          } catch (e) {}
+        }
+
+        const response = await fetch('/api/migration/export', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(backup)
+        });
+
+        if (response.ok) {
+          statusEl.innerHTML = '<h3 style="color: #4CAF50;">✅ Данные отправлены!</h3><p>Перенаправляю на новый путь...</p>';
+          setTimeout(() => {
+            window.location.href = '/detective-board/?auto-import=1';
+          }, 2000);
+        } else {
+          throw new Error('Server error: ' + response.status);
+        }
+      } catch (error) {
+        statusEl.innerHTML = '<h3 style="color: #f44336;">❌ Ошибка: ' + error.message + '</h3>';
+      }
+    };
+
+    // Auto-check on load
+    setTimeout(() => window.checkLocalStorage(), 500);
+  </script>
+</body>
+</html>

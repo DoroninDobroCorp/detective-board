@@ -16,6 +16,7 @@ import AchievementsPage from './pages/AchievementsPage';
 import WellbeingManager from './components/WellbeingManager';
 import GamificationManager from './components/GamificationManager';
 import { DiaryPage } from './pages/DiaryPage';
+import { LevelTitlesPage } from './pages/LevelTitlesPage';
 
 declare global {
   interface Window {
@@ -37,6 +38,7 @@ function App() {
   const initialized = useAppStore((s) => s.initialized);
   const init = useAppStore((s) => s.init);
   const log = getLogger('App');
+  
   useEffect(() => {
     // Expose store for e2e tests (dev only)
     try {
@@ -47,8 +49,49 @@ function App() {
       log.warn('app:expose-store-failed', { error: err instanceof Error ? err.message : String(err) });
     }
   }, []);
+  
   useEffect(() => {
-    if (!initialized) {
+    // Auto-import from migration endpoint
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('auto-import') === '1') {
+      log.info('auto-import:detected');
+      (async () => {
+        try {
+          const resp = await fetch('/api/migration/import');
+          if (!resp.ok) {
+            log.warn('auto-import:no-data');
+            void init();
+            return;
+          }
+          
+          const data = await resp.json();
+          log.info('auto-import:received', { 
+            nodes: data.nodes?.length,
+            diary: data.diary?.length,
+            hasGamification: !!data.gamification
+          });
+          
+          // Import using the importBackup function
+          const { importBackup } = await import('./exportImport');
+          
+          // Convert data to File-like object for importBackup
+          const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+          const file = new File([blob], 'migration.json', { type: 'application/json' });
+          
+          await importBackup(file, 'replace');
+          log.info('auto-import:success');
+          
+          // Remove the query param
+          window.history.replaceState({}, '', window.location.pathname);
+          
+          // Reload to ensure everything is properly initialized
+          setTimeout(() => window.location.reload(), 500);
+        } catch (err) {
+          log.error('auto-import:failed', { error: err instanceof Error ? err.message : String(err) });
+          void init();
+        }
+      })();
+    } else if (!initialized) {
       log.info('init:request');
       void init();
     }
@@ -70,6 +113,7 @@ function App() {
         <Route path="/games" element={<GamesPage />} />
         <Route path="/purchases" element={<PurchasesPage />} />
         <Route path="/achievements" element={<AchievementsPage />} />
+        <Route path="/level-titles" element={<LevelTitlesPage />} />
         <Route path="/diary" element={<DiaryPage />} />
         <Route path="/diag" element={<DiagPage />} />
       </Routes>
