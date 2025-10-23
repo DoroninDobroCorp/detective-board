@@ -4,6 +4,7 @@ import type { AnyNode, GroupNode, LinkThread, TaskNode, Tool, TaskStatus, Person
 import { getLogger } from './logger';
 import { computeNextDueDate, toIsoUTCFromYMD } from './recurrence';
 import { useGamificationStore } from './gamification';
+import { DebouncedBatcher } from './utils/debounce';
 
 export interface AppState {
   nodes: AnyNode[];
@@ -40,6 +41,8 @@ export interface AppState {
   addGroup: (name: string, position?: { x: number; y: number }) => Promise<string>;
   addPerson: (name?: string, role?: PersonRole, position?: { x: number; y: number }) => Promise<string>;
   updateNode: (id: string, patch: Partial<AnyNode>) => Promise<void>;
+  updateNodeOptimized: (id: string, patch: Partial<AnyNode>) => void;
+  flushPendingUpdates: (id?: string) => Promise<void>;
   moveNode: (id: string, x: number, y: number) => Promise<void>;
   moveNodeLocal: (id: string, x: number, y: number) => void;
   removeNode: (id: string) => Promise<void>;
@@ -80,6 +83,27 @@ function now() {
 }
 
 const log = getLogger('store');
+
+// Debounced batcher for optimized node updates
+// Updates UI immediately but batches database writes (300ms delay)
+const nodeUpdateBatcher = new DebouncedBatcher<string>(
+  async (id, patch: Partial<AnyNode>) => {
+    try {
+      const currentNode = useAppStore.getState().nodes.find((n) => n.id === id);
+      if (!currentNode) {
+        log.warn('nodeUpdateBatcher:node-not-found', { id });
+        return;
+      }
+      const updated = { ...currentNode, ...patch, updatedAt: now() };
+      await db.nodes.put(updated);
+      log.info('nodeUpdateBatcher:persisted', { id, patch });
+    } catch (err) {
+      log.error('nodeUpdateBatcher:failed', { id, error: String(err instanceof Error ? err.message : err) });
+    }
+  },
+  300,
+  (prev, next) => ({ ...prev, ...next }) // Merge patches
+);
 
 export const useAppStore = create<AppState>((set, get) => ({
   nodes: [],
@@ -592,6 +616,40 @@ export const useAppStore = create<AppState>((set, get) => ({
     const next = { ...prev, ...patch, updatedAt: now() } as AnyNode;
     await db.nodes.put(next);
     set((s) => ({ nodes: s.nodes.map((n) => (n.id === id ? next : n)) }));
+  },
+
+  updateNodeOptimized: (id, patch) => {
+    // Immediate UI update (synchronous)
+    const prev = get().nodes.find((n) => n.id === id);
+    if (!prev) return;
+    
+    // Handle XP revert for status changes
+    if (prev.type === 'task') {
+      const prevTask = prev as TaskNode;
+      const patchTask = patch as Partial<TaskNode>;
+      if (prevTask.status === 'done' && patchTask.status && patchTask.status !== 'done') {
+        const revertTaskXp = useGamificationStore.getState().revertTaskXp;
+        revertTaskXp(id);
+      }
+    }
+    
+    const next = { ...prev, ...patch, updatedAt: now() } as AnyNode;
+    // Update UI immediately (synchronous)
+    set((s) => ({ nodes: s.nodes.map((n) => (n.id === id ? next : n)) }));
+    
+    // Schedule debounced database write
+    nodeUpdateBatcher.schedule(id, patch);
+    
+    log.info('updateNodeOptimized', { id, patch, pending: nodeUpdateBatcher.getPendingCount() });
+  },
+
+  flushPendingUpdates: async (id) => {
+    if (id !== undefined) {
+      nodeUpdateBatcher.flush(id);
+    } else {
+      nodeUpdateBatcher.flush();
+    }
+    log.info('flushPendingUpdates', { id });
   },
 
   moveNode: async (id, x, y) => {
