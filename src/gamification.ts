@@ -4,6 +4,28 @@ import type { TaskPathInfo } from './taskUtils';
 
 export type Difficulty = 'easy' | 'medium' | 'hard';
 
+// Default level names
+const DEFAULT_LEVEL_NAMES = [
+  'Новичок',       // 1
+  'Исследователь', // 2
+  'Практик',       // 3
+  'Специалист',    // 4
+  'Эксперт',       // 5
+  'Мастер',        // 6
+  'Виртуоз',       // 7
+  'Гуру',          // 8
+  'Легенда',       // 9
+  'Титан',         // 10
+];
+
+function getDefaultLevelName(level: number): string {
+  if (level < 1) return 'Неизвестный';
+  if (level <= DEFAULT_LEVEL_NAMES.length) {
+    return DEFAULT_LEVEL_NAMES[level - 1];
+  }
+  return `Уровень ${level}`;
+}
+
 export interface TaskCompletionSummary extends TaskPathInfo {
   completedAt: number;
   difficulty: Difficulty;
@@ -204,7 +226,7 @@ export const useGamificationStore = create<GamificationState>()(
             for (let lvl = prevLevel + 1; lvl <= nextLevel; lvl++) {
               pending = [...pending, { level: lvl, totalXp: nextXp, completions, triggeredAt: Date.now() }];
               if (!titles[lvl]) {
-                titles[lvl] = { title: `Уровень ${lvl}`, assignedAt: Date.now() };
+                titles[lvl] = { title: getDefaultLevelName(lvl), assignedAt: Date.now() };
               }
             }
           }
@@ -356,7 +378,7 @@ export const useGamificationStore = create<GamificationState>()(
             for (let lvl = state.level + 1; lvl <= nextLevel; lvl++) {
               pending = [...pending, { level: lvl, totalXp: nextXp, completions, triggeredAt: Date.now() }];
               if (!titles[lvl]) {
-                titles[lvl] = { title: `Уровень ${lvl}`, assignedAt: Date.now() };
+                titles[lvl] = { title: getDefaultLevelName(lvl), assignedAt: Date.now() };
               }
             }
           }
