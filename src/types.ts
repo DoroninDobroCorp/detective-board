@@ -44,6 +44,7 @@ export interface TaskNode extends BaseNode {
   subtasks?: Subtask[]; // optional subtasks (not rendered on board, only in menus/pages)
   completedAt?: number; // timestamp when task was marked done
   recurrence?: Recurrence; // optional recurrence rule for auto-updating dueDate
+  everyDayMode?: boolean; // when true, task is postponed to next day on completion instead of being deleted
 }
 
 export interface GroupNode extends BaseNode {

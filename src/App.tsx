@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { Routes, Route, useLocation } from 'react-router-dom';
 import { useAppStore } from './store';
+import { useGamificationStore } from './gamification';
 import { BoardCanvas } from './components/BoardCanvas';
 import { Toolbar } from './components/Toolbar';
 import { InspectorPanel } from './components/InspectorPanel';
@@ -21,6 +22,7 @@ import { LevelTitlesPage } from './pages/LevelTitlesPage';
 declare global {
   interface Window {
     __appStore?: typeof useAppStore;
+    __gamificationStore?: typeof useGamificationStore;
   }
 }
 
@@ -39,11 +41,22 @@ function App() {
   const init = useAppStore((s) => s.init);
   const log = getLogger('App');
   
+  // Expose stores for e2e tests immediately
+  try {
+    if (import.meta.env.DEV || window.location.hostname === 'localhost' || window.location.pathname.includes('/detective-board/')) {
+      window.__appStore = useAppStore;
+      window.__gamificationStore = useGamificationStore;
+    }
+  } catch (err) {
+    log.warn('app:expose-store-failed', { error: err instanceof Error ? err.message : String(err) });
+  }
+
   useEffect(() => {
-    // Expose store for e2e tests (dev only)
+    // Re-expose stores for e2e tests (dev only)
     try {
-      if (import.meta.env.DEV) {
+      if (import.meta.env.DEV || window.location.hostname === 'localhost' || window.location.pathname.includes('/detective-board/')) {
         window.__appStore = useAppStore;
+        window.__gamificationStore = useGamificationStore;
       }
     } catch (err) {
       log.warn('app:expose-store-failed', { error: err instanceof Error ? err.message : String(err) });

@@ -27,6 +27,77 @@ html, body, #root {
   height: 100%;
   width: 100%;
   background: var(--bg);
+  touch-action: manipulation;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Mobile-specific styles */
+@media (max-width: 768px) {
+  .toolbar {
+    position: fixed;
+    top: 8px;
+    left: 8px;
+    right: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    z-index: 10;
+    max-height: 60vh;
+    overflow-y: auto;
+  }
+  
+  .tool-group {
+    flex-shrink: 0;
+    padding: 6px;
+    gap: 6px;
+  }
+  
+  .tool-btn, .tool-link {
+    min-width: 36px;
+    padding: 6px 8px;
+    font-size: 13px;
+  }
+  
+  .inspector {
+    position: fixed;
+    right: 8px;
+    top: 80px;
+    left: 8px;
+    width: auto;
+    max-height: 50vh;
+  }
+  
+  .board-canvas {
+    touch-action: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .toolbar {
+    top: 4px;
+    left: 4px;
+    right: 4px;
+    gap: 4px;
+  }
+  
+  .tool-group {
+    padding: 4px;
+    gap: 4px;
+  }
+  
+  .tool-btn, .tool-link {
+    min-width: 32px;
+    padding: 4px 6px;
+    font-size: 12px;
+  }
+  
+  .inspector {
+    top: 70px;
+    right: 4px;
+    left: 4px;
+  }
 }
 
 a { color: var(--accent); text-decoration: none; }
@@ -545,6 +616,41 @@ button.active {
   gap: 6px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
   max-width: 260px;
+  z-index: 1000;
+}
+
+/* Mobile search improvements */
+@media (max-width: 768px) {
+  .search-dropdown {
+    position: fixed !important;
+    top: 80px !important;
+    left: 8px !important;
+    right: 8px !important;
+    width: auto !important;
+    max-width: none !important;
+    max-height: 60vh !important;
+    border-radius: 12px !important;
+  }
+}
+
+/* Touch-friendly interaction areas */
+.touch-target {
+  min-height: 44px;
+  min-width: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Prevent zoom on input focus */
+input, textarea, select {
+  font-size: 16px; /* Prevents zoom on iOS */
+}
+
+@media (max-width: 768px) {
+  input, textarea, select {
+    font-size: 16px;
+  }
 }
 
 .diary-emoji-item {

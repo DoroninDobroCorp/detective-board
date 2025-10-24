@@ -3,20 +3,39 @@ import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
 async function resetAndSeed(page: Page) {
+  // Go to main page first to ensure app loads
+  await page.goto('/');
+  // Wait for store to be available AND initialized
+  await page.waitForFunction(() => {
+    const store = (globalThis as any).__appStore;
+    return store && store.getState && store.getState().initialized;
+  }, { timeout: 15000 });
+  
+  // Now navigate to active page
   await page.goto('/active');
-  await page.waitForFunction(() => Boolean((globalThis as any).__appStore));
+  // Wait a bit for the page to settle
+  await page.waitForTimeout(1000);
   const seedOk = await page.evaluate(async () => {
     const store = (globalThis as any).__appStore;
-    if (!store) return false;
-    // reset DB/state
-    await store.getState().resetAll();
-    // Add three tasks with ascending dates 18 < 19 < 20
-    const add = store.getState().addTask;
-    const mkISO = (y: number, m1: number, d: number, hh = 10, mm = 0) => new Date(Date.UTC(y, m1 - 1, d, hh, mm, 0, 0)).toISOString();
-    await add({ title: 'A-18', status: 'active', priority: 'med', dueDate: mkISO(2025, 9, 18, 2, 0) });
-    await add({ title: 'B-19', status: 'active', priority: 'med', dueDate: mkISO(2025, 9, 19, 2, 0) });
-    await add({ title: 'C-20', status: 'active', priority: 'med', dueDate: mkISO(2025, 9, 20, 2, 0) });
-    return true;
+    if (!store) {
+      console.log('Store not available');
+      return false;
+    }
+    try {
+      // reset DB/state
+      await store.getState().resetAll();
+      // Add three tasks with ascending dates 18 < 19 < 20
+      const add = store.getState().addTask;
+      const mkISO = (y: number, m1: number, d: number, hh = 10, mm = 0) => new Date(Date.UTC(y, m1 - 1, d, hh, mm, 0, 0)).toISOString();
+      await add({ title: 'A-18', status: 'active', priority: 'med', dueDate: mkISO(2025, 9, 18, 2, 0) });
+      await add({ title: 'B-19', status: 'active', priority: 'med', dueDate: mkISO(2025, 9, 19, 2, 0) });
+      await add({ title: 'C-20', status: 'active', priority: 'med', dueDate: mkISO(2025, 9, 20, 2, 0) });
+      console.log('Tasks added successfully');
+      return true;
+    } catch (error) {
+      console.log('Error during seeding:', error);
+      return false;
+    }
   });
   expect(seedOk).toBeTruthy();
 }

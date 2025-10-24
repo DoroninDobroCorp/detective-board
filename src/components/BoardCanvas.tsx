@@ -520,8 +520,9 @@ export const BoardCanvas: React.FC = () => {
     isPanningRef.current = false;
   }, [lasso, visibleNodes, selection, setSelection]);
 
-  // touch for pan/pinch
+  // Enhanced touch for pan/pinch with gesture conflict prevention
   const onTouchMove = useCallback((e: KonvaEventObject<TouchEvent>) => {
+    e.evt.preventDefault(); // Prevent default browser gestures
     const touches = e.evt.touches;
     if (touches && touches.length >= 2) {
       // pinch-zoom
@@ -534,7 +535,9 @@ export const BoardCanvas: React.FC = () => {
         lastDist.current = dist;
         return;
       }
-      const newScale = viewport.scale * (dist / lastDist.current);
+      // Clamp scale to reasonable bounds for mobile
+      const scaleDelta = dist / lastDist.current;
+      const newScale = Math.max(0.1, Math.min(5.0, viewport.scale * scaleDelta));
       const pointTo = {
         x: (center.x - viewport.x) / viewport.scale,
         y: (center.y - viewport.y) / viewport.scale,
@@ -546,26 +549,33 @@ export const BoardCanvas: React.FC = () => {
       setViewport({ x: newPos.x, y: newPos.y, scale: newScale });
       lastCenter.current = center;
       lastDist.current = dist;
-    } else {
-      const touch1 = touches && touches[0];
+    } else if (touches && touches.length === 1) {
+      const touch1 = touches[0];
       if (touch1) {
-        // pan
+        // pan with improved touch tracking
         if (!lastPosRef.current) {
           lastPosRef.current = { x: touch1.clientX, y: touch1.clientY };
           return;
         }
         const dx = touch1.clientX - lastPosRef.current.x;
         const dy = touch1.clientY - lastPosRef.current.y;
+        // Apply smoothing for mobile
+        const smoothing = 0.8;
+        const smoothDx = dx * smoothing;
+        const smoothDy = dy * smoothing;
         lastPosRef.current = { x: touch1.clientX, y: touch1.clientY };
-        setViewport({ x: viewport.x + dx, y: viewport.y + dy, scale: viewport.scale });
+        setViewport({ x: viewport.x + smoothDx, y: viewport.y + smoothDy, scale: viewport.scale });
       }
     }
   }, [viewport, setViewport]);
 
   const onTouchEnd = useCallback(() => {
-    lastCenter.current = null;
-    lastDist.current = 0;
-    lastPosRef.current = null;
+    // Clear touch state with delay to prevent gesture conflicts
+    setTimeout(() => {
+      lastCenter.current = null;
+      lastDist.current = 0;
+      lastPosRef.current = null;
+    }, 100);
   }, []);
 
   // удалены старые обработчики перетаскивания (перенесено ниже в мульти-логике)
@@ -1638,8 +1648,30 @@ export const BoardCanvas: React.FC = () => {
                   checked={(ctxNode as TaskNode).status === 'done'}
                   onChange={(e) => {
                     const done = e.target.checked;
+                    const t = ctxNode as TaskNode;
                     let patch: Partial<TaskNode>;
                     if (done) {
+                      // Handle everyDay mode: just postpone to next day
+                      if (t.everyDayMode) {
+                        const today = new Date();
+                        today.setDate(today.getDate() + 1);
+                        const y = today.getFullYear();
+                        const m = String(today.getMonth() + 1).padStart(2, '0');
+                        const d = String(today.getDate()).padStart(2, '0');
+                        const nextDayYMD = `${y}-${m}-${d}`;
+                        const nextDue = toIsoUTCFromYMD(nextDayYMD);
+                        patch = { 
+                          dueDate: nextDue,
+                          completedAt: Date.now(),
+                          subtasks: Array.isArray(t.subtasks)
+                            ? t.subtasks.map((s) => ({ ...s, done: false }))
+                            : undefined
+                        };
+                        void useAppStore.getState().updateNode(ctxNode.id, patch as any);
+                        log.info('everyDay:completed', { id: t.id, nextDue });
+                        return;
+                      }
+                      
                       const ask = window.prompt('Дата выполнения (YYYY-MM-DD или YYYY-MM-DD HH:mm). Пусто — сейчас:');
                       let completedAt = Date.now();
                       if (ask && ask.trim()) {
@@ -1670,6 +1702,14 @@ export const BoardCanvas: React.FC = () => {
                   onChange={(e) => { void useAppStore.getState().updateNode(ctxNode.id, { isActual: e.target.checked }); }}
                 />
                 <span>Актуальный</span>
+              </label>
+              <label className="radio" style={{ marginBottom: 6 }}>
+                <input
+                  type="checkbox"
+                  checked={!!(ctxNode as TaskNode).everyDayMode}
+                  onChange={(e) => { void useAppStore.getState().updateNode(ctxNode.id, { everyDayMode: e.target.checked }); }}
+                />
+                <span>🔄 Каждый день (переносить при завершении)</span>
               </label>
               <fieldset className="inspector__fieldset" style={{ marginBottom: 6 }}>
                 <legend style={{ fontSize: 12, color: '#ccc' }}>Текст</legend>
@@ -2042,6 +2082,13 @@ const NodeShape = React.memo<{
           <>
             <Rect x={t.width - 22} y={4} width={18} height={18} cornerRadius={9} fill={'#000'} shadowBlur={4} stroke={'#222'} strokeWidth={1} />
             <Text x={t.width - 22} y={4} width={18} height={18} text={'⏳'} fontSize={14} align="center" verticalAlign="middle" fill={'#fff'} />
+          </>
+        ) : null}
+        {/* everyDay mode badge */}
+        {t.everyDayMode ? (
+          <>
+            <Rect x={4} y={4} width={Math.min(t.width * 0.3, 50)} height={16} cornerRadius={4} fill={'#1a3a5a'} shadowBlur={3} stroke={'#2a4a6a'} strokeWidth={1} />
+            <Text x={4} y={4} width={Math.min(t.width * 0.3, 50)} height={16} text={'🔄'} fontSize={12} align="center" verticalAlign="middle" fill={'#8ab4f8'} fontStyle="bold" />
           </>
         ) : null}
 

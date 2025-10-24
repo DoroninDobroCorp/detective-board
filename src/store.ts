@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { db } from './db';
+import { db, type HistoryEntry } from './db';
 import type { AnyNode, GroupNode, LinkThread, TaskNode, Tool, TaskStatus, PersonNode, PersonRole } from './types';
 import { getLogger } from './logger';
 import { computeNextDueDate, toIsoUTCFromYMD } from './recurrence';
@@ -25,8 +25,32 @@ export interface AppState {
   pendingLinkFrom: string | null;
 
   // history
-  historyPast: Array<{ nodes: AnyNode[]; links: LinkThread[]; viewport: { x: number; y: number; scale: number }; currentParentId: string | null }>;
-  historyFuture: Array<{ nodes: AnyNode[]; links: LinkThread[]; viewport: { x: number; y: number; scale: number }; currentParentId: string | null }>;
+  historyPast: Array<{ 
+    nodes: AnyNode[]; 
+    links: LinkThread[]; 
+    viewport: { x: number; y: number; scale: number }; 
+    currentParentId: string | null;
+    gamification?: {
+      xp: number;
+      level: number;
+      xpHistory: any[];
+      completions: any[];
+      processedTasks: Record<string, boolean>;
+    };
+  }>;
+  historyFuture: Array<{ 
+    nodes: AnyNode[]; 
+    links: LinkThread[]; 
+    viewport: { x: number; y: number; scale: number }; 
+    currentParentId: string | null;
+    gamification?: {
+      xp: number;
+      level: number;
+      xpHistory: any[];
+      completions: any[];
+      processedTasks: Record<string, boolean>;
+    };
+  }>;
 
   // perf
   perfModeOverride: 'auto' | 'perf' | 'super';
@@ -83,6 +107,81 @@ function now() {
 }
 
 const log = getLogger('store');
+
+// Helper to capture current gamification state for history
+function captureGamificationState() {
+  try {
+    const gamState = useGamificationStore.getState();
+    return {
+      xp: gamState.xp,
+      level: gamState.level,
+      xpHistory: [...gamState.xpHistory],
+      completions: [...gamState.completions],
+      processedTasks: { ...gamState.processedTasks },
+      achievements: [...gamState.achievements],
+      levelTitles: { ...gamState.levelTitles },
+      claimedBonuses: { ...gamState.claimedBonuses },
+      pendingLevelUps: [...gamState.pendingLevelUps],
+      pendingManualCandidates: [...gamState.pendingManualCandidates],
+    };
+  } catch (err) {
+    log.warn('captureGamificationState:failed', { error: String(err instanceof Error ? err.message : err) });
+    return undefined;
+  }
+}
+
+// Helper to save history stack to database
+async function saveHistoryToDb(past: HistoryEntry[], future: HistoryEntry[]) {
+  try {
+    await db.history.put({
+      id: 'history_state',
+      past,
+      future,
+      updatedAt: Date.now(),
+    });
+    log.info('saveHistoryToDb:success', { pastLength: past.length, futureLength: future.length });
+  } catch (err) {
+    log.error('saveHistoryToDb:failed', { error: String(err instanceof Error ? err.message : err) });
+  }
+}
+
+// Helper to load history stack from database
+async function loadHistoryFromDb(): Promise<{ past: HistoryEntry[]; future: HistoryEntry[] }> {
+  try {
+    const historyState = await db.history.get('history_state');
+    if (historyState) {
+      log.info('loadHistoryFromDb:success', { pastLength: historyState.past.length, futureLength: historyState.future.length });
+      return {
+        past: historyState.past,
+        future: historyState.future,
+      };
+    }
+  } catch (err) {
+    log.warn('loadHistoryFromDb:failed', { error: String(err instanceof Error ? err.message : err) });
+  }
+  return { past: [], future: [] };
+}
+
+// Helper to push new history entry and persist
+function pushHistoryAndSave(get: any, set: any) {
+  const s0 = get();
+  const newEntry: HistoryEntry = {
+    nodes: s0.nodes,
+    links: s0.links,
+    viewport: s0.viewport,
+    currentParentId: s0.currentParentId,
+    gamification: captureGamificationState(),
+  };
+  set((s: any) => ({
+    historyPast: [...s.historyPast, newEntry],
+    historyFuture: [],
+  }));
+  // Save to DB asynchronously (don't wait)
+  const newPast = [...s0.historyPast, newEntry];
+  saveHistoryToDb(newPast, []).catch((err) => {
+    log.error('pushHistoryAndSave:save-failed', { error: String(err) });
+  });
+}
 
 // Debounced batcher for optimized node updates
 // Updates UI immediately but batches database writes (300ms delay)
@@ -208,6 +307,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         try {
           const res = await fetch(`${import.meta.env.BASE_URL}bootstrap-backup.json`, { cache: 'no-store' });
           if (!res.ok) return false;
+          const contentType = res.headers.get('content-type');
+          if (!contentType || !contentType.includes('application/json')) {
+            log.warn('init:bootstrap:not-json', { contentType });
+            return false;
+          }
           const data = await res.json();
           const nodesB = Array.isArray((data as any).nodes) ? (data as any).nodes : [];
           const linksB = Array.isArray((data as any).links) ? (data as any).links : [];
@@ -312,8 +416,11 @@ export const useAppStore = create<AppState>((set, get) => ({
           log.warn('init:restore-group-failed', { error: String(err instanceof Error ? err.message : err) });
         }
         
-        set({ nodes: nodesCopy, links, users, initialized: true, currentParentId: restoredParentId });
-        log.info('init:loaded', { nodes: nodesCopy.length, links: links.length, users: users.length, currentParentId: restoredParentId });
+        // Load history stack from database
+        const { past, future } = await loadHistoryFromDb();
+        
+        set({ nodes: nodesCopy, links, users, initialized: true, currentParentId: restoredParentId, historyPast: past, historyFuture: future });
+        log.info('init:loaded', { nodes: nodesCopy.length, links: links.length, users: users.length, currentParentId: restoredParentId, historyPast: past.length, historyFuture: future.length });
       }
     } catch (err) {
       // Fallback to in-memory state (no persistence)
@@ -402,8 +509,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   addPerson: async (name = 'Новый человек', role: PersonRole = 'employee', position) => {
-    const s0 = get();
-    set((s) => ({ historyPast: [...s.historyPast, { nodes: s0.nodes, links: s0.links, viewport: s0.viewport, currentParentId: s0.currentParentId }], historyFuture: [] }));
+    pushHistoryAndSave(get, set);
     const id = crypto.randomUUID();
     const colorByRole: Record<PersonRole, string> = {
       employee: '#B3E5FC',
@@ -433,8 +539,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   deleteSelection: async () => {
-    const s0 = get();
-    set((s) => ({ historyPast: [...s.historyPast, { nodes: s0.nodes, links: s0.links, viewport: s0.viewport, currentParentId: s0.currentParentId }], historyFuture: [] }));
+    pushHistoryAndSave(get, set);
     const ids = new Set(get().selection);
     const linkIds = new Set(get().linkSelection);
     if (ids.size === 0 && linkIds.size === 0) return;
@@ -474,8 +579,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   groupSelection: async (name) => {
-    const s0 = get();
-    set((s) => ({ historyPast: [...s.historyPast, { nodes: s0.nodes, links: s0.links, viewport: s0.viewport, currentParentId: s0.currentParentId }], historyFuture: [] }));
+    pushHistoryAndSave(get, set);
     const parentId = get().currentParentId;
     const selectedIds = new Set(get().selection);
     const levelNodes = get().nodes.filter((n) => n.parentId === parentId && selectedIds.has(n.id));
@@ -541,8 +645,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   addTask: async (partial) => {
     // history
-    const s0 = get();
-    set((s) => ({ historyPast: [...s.historyPast, { nodes: s0.nodes, links: s0.links, viewport: s0.viewport, currentParentId: s0.currentParentId }], historyFuture: [] }));
+    pushHistoryAndSave(get, set);
     const id = crypto.randomUUID();
     const node: TaskNode = {
       id,
@@ -563,6 +666,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       textSize: partial.textSize,
       subtasks: partial.subtasks,
       recurrence: (partial as any).recurrence,
+      everyDayMode: (partial as any).everyDayMode,
       createdAt: now(),
       updatedAt: now(),
       isActual: true,
@@ -574,8 +678,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   addGroup: async (name, position) => {
-    const s0 = get();
-    set((s) => ({ historyPast: [...s.historyPast, { nodes: s0.nodes, links: s0.links, viewport: s0.viewport, currentParentId: s0.currentParentId }], historyFuture: [] }));
+    pushHistoryAndSave(get, set);
     const id = crypto.randomUUID();
     const node: GroupNode = {
       id,
@@ -598,8 +701,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   updateNode: async (id, patch) => {
-    const s0 = get();
-    set((s) => ({ historyPast: [...s.historyPast, { nodes: s0.nodes, links: s0.links, viewport: s0.viewport, currentParentId: s0.currentParentId }], historyFuture: [] }));
+    pushHistoryAndSave(get, set);
     const prev = get().nodes.find((n) => n.id === id);
     if (!prev) return;
     
@@ -669,8 +771,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   removeNode: async (id) => {
-    const s0 = get();
-    set((s) => ({ historyPast: [...s.historyPast, { nodes: s0.nodes, links: s0.links, viewport: s0.viewport, currentParentId: s0.currentParentId }], historyFuture: [] }));
+    pushHistoryAndSave(get, set);
     // Remove node and its descendants
     log.info('removeNode:start', { id });
     const all = get().nodes;
@@ -713,8 +814,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       return '';
     }
     // Сохраняем history только если связь реально создается
-    const s0 = get();
-    set((s) => ({ historyPast: [...s.historyPast, { nodes: s0.nodes, links: s0.links, viewport: s0.viewport, currentParentId: s0.currentParentId }], historyFuture: [] }));
+    pushHistoryAndSave(get, set);
     const id = crypto.randomUUID();
     const link: LinkThread = { id, fromId, toId, color, dir: 'one' };
     await db.links.add(link);
@@ -724,8 +824,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   updateLink: async (id, patch) => {
-    const s0 = get();
-    set((s) => ({ historyPast: [...s.historyPast, { nodes: s0.nodes, links: s0.links, viewport: s0.viewport, currentParentId: s0.currentParentId }], historyFuture: [] }));
+    pushHistoryAndSave(get, set);
     const prev = get().links.find((l) => l.id === id);
     if (!prev) return;
     const next = { ...prev, ...patch } as LinkThread;
@@ -735,8 +834,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   removeLink: async (id) => {
-    const s0 = get();
-    set((s) => ({ historyPast: [...s.historyPast, { nodes: s0.nodes, links: s0.links, viewport: s0.viewport, currentParentId: s0.currentParentId }], historyFuture: [] }));
+    pushHistoryAndSave(get, set);
     await db.links.delete(id);
     set((s) => ({ links: s.links.filter((l) => l.id !== id) }));
     log.info('removeLink', { id });
@@ -809,7 +907,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   undo: async () => {
     const past = get().historyPast;
     if (past.length === 0) return;
-    const current = { nodes: get().nodes, links: get().links, viewport: get().viewport, currentParentId: get().currentParentId };
+    const current = { nodes: get().nodes, links: get().links, viewport: get().viewport, currentParentId: get().currentParentId, gamification: captureGamificationState() };
     const prev = past[past.length - 1];
     set((s) => ({
       historyPast: s.historyPast.slice(0, -1),
@@ -819,6 +917,30 @@ export const useAppStore = create<AppState>((set, get) => ({
       viewport: prev.viewport,
       currentParentId: prev.currentParentId,
     }));
+    
+    // Restore gamification state if present
+    if (prev.gamification) {
+      try {
+        const gamStore = useGamificationStore.getState();
+        set(() => ({})); // trigger a state update to ensure gamification store updates
+        useGamificationStore.setState({
+          xp: prev.gamification.xp,
+          level: prev.gamification.level,
+          xpHistory: prev.gamification.xpHistory,
+          completions: prev.gamification.completions,
+          processedTasks: prev.gamification.processedTasks,
+          achievements: prev.gamification.achievements || gamStore.achievements,
+          levelTitles: prev.gamification.levelTitles || gamStore.levelTitles,
+          claimedBonuses: prev.gamification.claimedBonuses || gamStore.claimedBonuses,
+          pendingLevelUps: prev.gamification.pendingLevelUps || gamStore.pendingLevelUps,
+          pendingManualCandidates: prev.gamification.pendingManualCandidates || gamStore.pendingManualCandidates,
+        }, false); // partial update to preserve functions
+        log.info('undo:gamification-restored', { xp: prev.gamification.xp, level: prev.gamification.level });
+      } catch (err) {
+        log.warn('undo:gamification-restore-failed', { error: String(err instanceof Error ? err.message : err) });
+      }
+    }
+    
     await db.nodes.clear();
     await db.nodes.bulkAdd(get().nodes);
     await db.links.clear();
@@ -834,7 +956,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   redo: async () => {
     const future = get().historyFuture;
     if (future.length === 0) return;
-    const current = { nodes: get().nodes, links: get().links, viewport: get().viewport, currentParentId: get().currentParentId };
+    const current = { nodes: get().nodes, links: get().links, viewport: get().viewport, currentParentId: get().currentParentId, gamification: captureGamificationState() };
     const next = future[0];
     set((s) => ({
       historyPast: [...s.historyPast, current],
@@ -844,6 +966,30 @@ export const useAppStore = create<AppState>((set, get) => ({
       viewport: next.viewport,
       currentParentId: next.currentParentId,
     }));
+    
+    // Restore gamification state if present
+    if (next.gamification) {
+      try {
+        const gamStore = useGamificationStore.getState();
+        set(() => ({})); // trigger a state update to ensure gamification store updates
+        useGamificationStore.setState({
+          xp: next.gamification.xp,
+          level: next.gamification.level,
+          xpHistory: next.gamification.xpHistory,
+          completions: next.gamification.completions,
+          processedTasks: next.gamification.processedTasks,
+          achievements: next.gamification.achievements || gamStore.achievements,
+          levelTitles: next.gamification.levelTitles || gamStore.levelTitles,
+          claimedBonuses: next.gamification.claimedBonuses || gamStore.claimedBonuses,
+          pendingLevelUps: next.gamification.pendingLevelUps || gamStore.pendingLevelUps,
+          pendingManualCandidates: next.gamification.pendingManualCandidates || gamStore.pendingManualCandidates,
+        }, false); // partial update to preserve functions
+        log.info('redo:gamification-restored', { xp: next.gamification.xp, level: next.gamification.level });
+      } catch (err) {
+        log.warn('redo:gamification-restore-failed', { error: String(err instanceof Error ? err.message : err) });
+      }
+    }
+    
     await db.nodes.clear();
     await db.nodes.bulkAdd(get().nodes);
     await db.links.clear();

@@ -216,6 +216,14 @@ export const ActiveTasksPage: React.FC = () => {
                     style={{ position: 'absolute', top: 6, right: 6, width: 22, height: 22, borderRadius: '50%', background: '#000', color: '#fff', display: 'grid', placeItems: 'center', fontSize: 13, lineHeight: 1, boxShadow: '0 1px 4px rgba(0,0,0,0.35)', zIndex: 2, border: '1px solid #222', pointerEvents: 'none' }}
                   >⏳</div>
                 ) : null}
+                {t.everyDayMode ? (
+                  <div
+                    title="Повторяется каждый день"
+                    aria-label="Повторяется каждый день"
+                    data-testid="everyday-badge"
+                    style={{ position: 'absolute', top: 6, left: 6, padding: '2px 6px', borderRadius: 4, background: '#1a3a5a', color: '#8ab4f8', fontSize: 11, fontWeight: 600, boxShadow: '0 1px 4px rgba(0,0,0,0.35)', zIndex: 2, border: '1px solid #2a4a6a', pointerEvents: 'none' }}
+                  >🔄 Каждый день</div>
+                ) : null}
                 {/* Title + description with inline editing */}
                 {editId === t.id ? (
                   <div style={{ display: 'grid', gap: 6 }}>
@@ -291,6 +299,30 @@ export const ActiveTasksPage: React.FC = () => {
                       title="Отметить выполненной"
                       style={{ padding: '4px 8px' }}
                       onClick={async () => {
+                        // Handle everyDay mode: postpone to next day without marking as done
+                        if (t.everyDayMode) {
+                          // Calculate next day's due date
+                          const today = new Date();
+                          today.setDate(today.getDate() + 1);
+                          const y = today.getFullYear();
+                          const m = String(today.getMonth() + 1).padStart(2, '0');
+                          const d = String(today.getDate()).padStart(2, '0');
+                          const nextDayYMD = `${y}-${m}-${d}`;
+                          const nextDue = toIsoUTCFromYMD(nextDayYMD);
+                          
+                          // Update task with new due date and reset subtasks
+                          await updateNode(t.id, { 
+                            dueDate: nextDue,
+                            completedAt: Date.now(),
+                            subtasks: Array.isArray(t.subtasks)
+                              ? t.subtasks.map((s) => ({ ...s, done: false }))
+                              : undefined
+                          });
+                          
+                          log.info('everyDay:completed', { id: t.id, nextDue });
+                          return;
+                        }
+                        
                         const ask = window.prompt('Дата выполнения (YYYY-MM-DD или YYYY-MM-DD HH:mm). Пусто — сейчас:');
                         let completedTs = Date.now();
                         if (ask && ask.trim()) {
@@ -515,6 +547,18 @@ export const ActiveTasksPage: React.FC = () => {
                 }}
                 placeholder="Не указана"
               />
+            </label>
+
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 14, cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={!!task.everyDayMode}
+                onChange={(e) => {
+                  void updateNode(task.id, { everyDayMode: e.target.checked });
+                }}
+                style={{ cursor: 'pointer' }}
+              />
+              <span>🔄 Режим "Каждый день" (при завершении переносится на следующий день)</span>
             </label>
 
             <div style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid #444', display: 'flex', gap: 8 }}>

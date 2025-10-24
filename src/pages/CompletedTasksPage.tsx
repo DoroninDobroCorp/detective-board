@@ -53,6 +53,7 @@ function xpBadgeValue(amount: number | undefined): string {
 
 const CompletedTasksPage: React.FC = () => {
   const nodes = useAppStore((s) => s.nodes);
+  const updateNode = useAppStore((s) => s.updateNode);
   const removeNode = useAppStore((s) => s.removeNode);
   const revealNode = useAppStore((s) => s.revealNode);
   const completions = useGamificationStore((s) => s.completions);
@@ -382,6 +383,19 @@ const CompletedTasksPage: React.FC = () => {
                     ) : null}
                     <div className="active-item__meta" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 8 }}>
                       {timeLabel ? <span className="badge">⏱ {timeLabel}</span> : null}
+                      <button
+                        className="tool-btn"
+                        title="Отменить выполнение"
+                        aria-label="Отменить выполнение"
+                        onClick={async () => {
+                          if (window.confirm(`Отменить выполнение задачи "${task.title}"? XP будет возвращен.`)) {
+                            await updateNode(task.id, { status: 'active', completedAt: undefined });
+                            log.info('task:completion-undone', { id: task.id, title: task.title });
+                          }
+                        }}
+                      >
+                        ↩️
+                      </button>
                       <button
                         className="tool-btn"
                         title="Открыть на доске"
