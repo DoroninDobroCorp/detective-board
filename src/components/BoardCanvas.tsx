@@ -47,38 +47,67 @@ function clamp(v: number, min: number, max: number) {
 
 // Compute point on node border towards another node center (for nice arrow anchoring)
 function computeAnchorTowards(n: AnyNode, target: AnyNode) {
-  const c1 = computeNodeCenter(n);
-  const c2 = computeNodeCenter(target);
-  const dx = c2.cx - c1.cx;
-  const dy = c2.cy - c1.cy;
-  if (n.type === 'task') {
-    const hw = n.width / 2;
-    const hh = n.height / 2;
-    const s = Math.max(Math.abs(dx) / hw, Math.abs(dy) / hh) || 1;
-    return { x: c1.cx + dx / s, y: c1.cy + dy / s };
+  // Центры
+  const cx = n.x + n.width / 2;
+  const cy = n.y + n.height / 2;
+  const tcx = target.x + target.width / 2;
+  const tcy = target.y + target.height / 2;
+
+  // Определяем направление от n к target
+  const dx = tcx - cx;
+  const dy = tcy - cy;
+
+  // Если центры совпадают (редко), возвращаем центр
+  if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return { x: cx, y: cy };
+
+  // Определяем, какая сторона ближе.
+  // Сравниваем тангенс угла наклона.
+  // Угол диагонали прямоугольника n:
+  // aspect = h / w.
+  // Если |dy/dx| > aspect, то это верх/низ. Иначе лево/право.
+
+  const aspect = n.height / n.width;
+  const slope = Math.abs(dy / dx);
+
+  if (slope > aspect) {
+    // Верх или Низ
+    if (dy > 0) {
+      // Низ
+      return { x: cx, y: n.y + n.height };
+    } else {
+      // Верх
+      return { x: cx, y: n.y };
+    }
   } else {
-    const r = Math.min(n.width, n.height) / 2;
-    const len = Math.hypot(dx, dy) || 1;
-    const ux = dx / len, uy = dy / len;
-    return { x: c1.cx + ux * r, y: c1.cy + uy * r };
+    // Лево или Право
+    if (dx > 0) {
+      // Право
+      return { x: n.x + n.width, y: cy };
+    } else {
+      // Лево
+      return { x: n.x, y: cy };
+    }
   }
 }
 
 // Compute point on node border towards arbitrary world point
 function computeAnchorTowardsPoint(n: AnyNode, p: { x: number; y: number }) {
-  const c1 = computeNodeCenter(n);
-  const dx = p.x - c1.cx;
-  const dy = p.y - c1.cy;
-  if (n.type === 'task') {
-    const hw = n.width / 2;
-    const hh = n.height / 2;
-    const s = Math.max(Math.abs(dx) / hw, Math.abs(dy) / hh) || 1;
-    return { x: c1.cx + dx / s, y: c1.cy + dy / s };
+  const cx = n.x + n.width / 2;
+  const cy = n.y + n.height / 2;
+  const dx = p.x - cx;
+  const dy = p.y - cy;
+
+  if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return { x: cx, y: cy };
+
+  const aspect = n.height / n.width;
+  const slope = Math.abs(dy / dx);
+
+  if (slope > aspect) {
+    if (dy > 0) return { x: cx, y: n.y + n.height };
+    else return { x: cx, y: n.y };
   } else {
-    const r = Math.min(n.width, n.height) / 2;
-    const len = Math.hypot(dx, dy) || 1;
-    const ux = dx / len, uy = dy / len;
-    return { x: c1.cx + ux * r, y: c1.cy + uy * r };
+    if (dx > 0) return { x: n.x + n.width, y: cy };
+    else return { x: n.x, y: cy };
   }
 }
 
@@ -113,12 +142,12 @@ function estimateTaskFont(text: string, base: number, contentW: number, contentH
 export const BoardCanvas: React.FC = () => {
   const nodes = useAppStore((s) => s.nodes);
   const currentParentId = useAppStore((s) => s.currentParentId);
-  
+
   // ОПТИМИЗАЦИЯ: фильтруем видимые узлы и кэшируем по хэшу
   const visibleNodes = useMemo(() => {
     return nodes.filter((n) => n.parentId === currentParentId && !(n.type === 'task' && (n as TaskNode).status === 'done'));
   }, [nodes, currentParentId]);
-  
+
   const links = useAppStore((s) => s.links);
   const viewport = useAppStore((s) => s.viewport);
   const setViewportRaw = useAppStore((s) => s.setViewport);
@@ -186,12 +215,13 @@ export const BoardCanvas: React.FC = () => {
   const lastCenter = useRef<{ x: number; y: number } | null>(null);
   const lastDist = useRef<number>(0);
   const lassoClickGuardRef = useRef<boolean>(false);
-  const [pendingLinkFrom, setPendingLinkFrom] = useState<string | null>(null);
+  const pendingLinkFrom = useAppStore((s) => s.pendingLinkFrom);
+  const setPendingLinkFrom = useAppStore((s) => s.setPendingLinkFrom);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; nodeId: string } | null>(null);
   const [linkCtxMenu, setLinkCtxMenu] = useState<{ x: number; y: number; linkId: string } | null>(null);
   const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
   const [linkError, setLinkError] = useState<string | null>(null);
-  
+
   // Сброс pendingLinkFrom при выключении режима нитки
   useEffect(() => {
     if (tool !== 'link') {
@@ -317,7 +347,7 @@ export const BoardCanvas: React.FC = () => {
       lastLevelRef.current = currentParentId; // помечаем уровень как инициализированный
       lastRestoredLevelRef.current = lk; // запоминаем, что этот уровень восстановлен
       log.info('startViewCenter:restore', { level: lk, center: { x: payload.x, y: payload.y, scale: s } });
-    } catch {}
+    } catch { }
   }, [levelKey, width, height, setViewport, currentParentId, log, hasStoredLevelView]);
 
   // Если в группе нет детей — один раз центрируем локальный (0,0) в центр экрана, чтобы не было "пустоты"
@@ -340,7 +370,7 @@ export const BoardCanvas: React.FC = () => {
     try {
       const s = stageRef.current as unknown as { batchDraw?: () => void } | null;
       s?.batchDraw?.();
-    } catch {}
+    } catch { }
   }, [currentParentId, visibleNodes.length, viewport.x, viewport.y, viewport.scale]);
 
   const ctxNode = useMemo(() => (ctxMenu ? nodes.find((n) => n.id === ctxMenu.nodeId) : null), [ctxMenu, nodes]);
@@ -462,7 +492,7 @@ export const BoardCanvas: React.FC = () => {
       }
       setMousePos({ x: lx, y: ly });
     }
-    
+
     // lasso
     if (lasso) {
       if (!pointer) return;
@@ -581,6 +611,12 @@ export const BoardCanvas: React.FC = () => {
   // удалены старые обработчики перетаскивания (перенесено ниже в мульти-логике)
 
   const handleNodeClick = useCallback((id: string, ev?: KonvaEventObject<MouseEvent>) => {
+    // Читаем состояние напрямую, чтобы избежать проблем с замыканиями
+    const state = useAppStore.getState();
+    const tool = state.tool;
+    const selection = state.selection;
+    const pendingLinkFrom = state.pendingLinkFrom;
+
     if (tool !== 'link') {
       const evt = ev?.evt as MouseEvent | undefined;
       const shift = !!(evt && (evt.shiftKey || evt.metaKey || evt.ctrlKey));
@@ -623,7 +659,7 @@ export const BoardCanvas: React.FC = () => {
     } else if (tool === 'add-task' || tool === 'add-group' || tool === 'add-person-employee' || tool === 'add-person-partner' || tool === 'add-person-bot') {
       // ignore clicks in create modes
     }
-  }, [tool, pendingLinkFrom, addLink, setSelection, selection, log]);
+  }, [setSelection, setPendingLinkFrom, addLink, setLinkError, log]);
 
   const handleNodeDblClick = useCallback((node: AnyNode, ev?: KonvaEventObject<MouseEvent>) => {
     if (node.type === 'group') {
@@ -749,14 +785,14 @@ export const BoardCanvas: React.FC = () => {
     // ОПТИМИЗАЦИЯ: сохраняем в history один раз при начале перетаскивания
     if (!dragHistorySavedRef.current) {
       const s0 = useAppStore.getState();
-      useAppStore.setState((s) => ({ 
-        historyPast: [...s.historyPast, { 
-          nodes: s0.nodes, 
-          links: s0.links, 
-          viewport: s0.viewport, 
-          currentParentId: s0.currentParentId 
-        }], 
-        historyFuture: [] 
+      useAppStore.setState((s) => ({
+        historyPast: [...s.historyPast, {
+          nodes: s0.nodes,
+          links: s0.links,
+          viewport: s0.viewport,
+          currentParentId: s0.currentParentId
+        }],
+        historyFuture: []
       }));
       dragHistorySavedRef.current = true;
     }
@@ -853,7 +889,8 @@ export const BoardCanvas: React.FC = () => {
         if (parentId === g.id) {
           // Мы ВНУТРИ группы: cx,cy заданы в локальных координатах группы.
           const dLocal = Math.hypot(cx - r, cy - r);
-          const thresholdLocal = r + Math.max(halfW, halfH) * 0.35;
+          // Уменьшаем порог: достаточно вытащить центр узла за пределы радиуса группы
+          const thresholdLocal = r;
           if (dLocal > thresholdLocal) {
             const angle = Math.atan2(cy - r, cx - r);
             const gxParent = g.x + r;
@@ -871,7 +908,8 @@ export const BoardCanvas: React.FC = () => {
           const gxParent = g.x + r;
           const gyParent = g.y + r;
           const dParent = Math.hypot(cx - gxParent, cy - gyParent);
-          const thresholdParent = r + Math.max(halfW, halfH) * 0.35;
+          // Уменьшаем порог: если центр узла вышел за пределы группы — выносим
+          const thresholdParent = r;
           if (dParent > thresholdParent) {
             const angle = Math.atan2(cy - gyParent, cx - gxParent);
             const outCx = gxParent + Math.cos(angle) * (r + margin + halfW);
@@ -1242,174 +1280,175 @@ export const BoardCanvas: React.FC = () => {
               );
             })()}
             {linksToRender.map(({ base: l, from, to }) => {
-            const a = computeAnchorTowards(from, to);
-            const b = computeAnchorTowards(to, from);
-            const useBezier = !perfMode;
-            const mx = (a.x + b.x) / 2;
-            const my = (a.y + b.y) / 2 - 30;
-            const hasReverse = links.some((r) => r.fromId === l.toId && r.toId === l.fromId);
-            const stroke = l.color || '#C94545';
-            return (
-              <React.Fragment key={`rl-${l.id}`}>
-                <Arrow
-                  points={useBezier ? [a.x, a.y, mx, my, b.x, b.y] : [a.x, a.y, b.x, b.y]}
-                  stroke={stroke}
-                  strokeWidth={linkSelection.includes(l.id) ? 4 : 2}
-                  tension={useBezier ? 0.5 : 0}
-                  bezier={useBezier}
-                  pointerLength={18}
-                  pointerWidth={18}
-                  fill={stroke}
-                  pointerAtBeginning={(l.dir || 'one') === 'both' || hasReverse}
-                  hitStrokeWidth={40}
-                  perfectDrawEnabled={false}
-                  shadowColor={perfMode ? undefined : '#00000080'}
-                  shadowBlur={perfMode ? 0 : (linkSelection.includes(l.id) ? 10 : 6)}
-                  onMouseEnter={(ev) => {
-                    setHoveredLink(l.id);
-                    if (showLinkHud) setHoverHUD({ x: ev.evt.clientX, y: ev.evt.clientY, text: `${nodeDisplayName(from)} ${(l.dir==='both'||hasReverse)?'↔':'→'} ${nodeDisplayName(to)}` });
-                  }}
-                  onMouseMove={(ev) => {
-                    if (showLinkHud && hoveredLink === l.id) setHoverHUD({ x: ev.evt.clientX, y: ev.evt.clientY, text: `${nodeDisplayName(from)} ${(l.dir==='both'||hasReverse)?'↔':'→'} ${nodeDisplayName(to)}` });
-                  }}
-                  onMouseLeave={() => { setHoveredLink((p) => (p === l.id ? null : p)); setHoverHUD(null); }}
-                  onClick={(ev) => {
-                    const evt = ev.evt as MouseEvent;
-                    if (evt.shiftKey || evt.metaKey || evt.ctrlKey) {
-                      const next = new Set<string>(linkSelection);
-                      if (next.has(l.id)) next.delete(l.id); else next.add(l.id);
-                      setLinkSelection(Array.from(next));
-                    } else {
+              const a = computeAnchorTowards(from, to);
+              const b = computeAnchorTowards(to, from);
+              const useBezier = !perfMode;
+              const mx = (a.x + b.x) / 2;
+              const my = (a.y + b.y) / 2 - 30;
+              const hasReverse = links.some((r) => r.fromId === l.toId && r.toId === l.fromId);
+              const stroke = l.color || '#C94545';
+              return (
+                <React.Fragment key={`rl-${l.id}`}>
+                  <Arrow
+                    points={useBezier ? [a.x, a.y, mx, my, b.x, b.y] : [a.x, a.y, b.x, b.y]}
+                    stroke={stroke}
+                    strokeWidth={linkSelection.includes(l.id) ? 4 : 2}
+                    tension={useBezier ? 0.5 : 0}
+                    bezier={useBezier}
+                    pointerLength={18}
+                    pointerWidth={18}
+                    fill={stroke}
+                    pointerAtBeginning={(l.dir || 'one') === 'both' || hasReverse}
+                    hitStrokeWidth={40}
+                    perfectDrawEnabled={false}
+                    shadowColor={perfMode ? undefined : '#00000080'}
+                    shadowBlur={perfMode ? 0 : (linkSelection.includes(l.id) ? 10 : 6)}
+                    onMouseEnter={(ev) => {
+                      setHoveredLink(l.id);
+                      if (showLinkHud) setHoverHUD({ x: ev.evt.clientX, y: ev.evt.clientY, text: `${nodeDisplayName(from)} ${(l.dir === 'both' || hasReverse) ? '↔' : '→'} ${nodeDisplayName(to)}` });
+                    }}
+                    onMouseMove={(ev) => {
+                      if (showLinkHud && hoveredLink === l.id) setHoverHUD({ x: ev.evt.clientX, y: ev.evt.clientY, text: `${nodeDisplayName(from)} ${(l.dir === 'both' || hasReverse) ? '↔' : '→'} ${nodeDisplayName(to)}` });
+                    }}
+                    onMouseLeave={() => { setHoveredLink((p) => (p === l.id ? null : p)); setHoverHUD(null); }}
+                    onClick={(ev) => {
+                      const evt = ev.evt as MouseEvent;
+                      if (evt.shiftKey || evt.metaKey || evt.ctrlKey) {
+                        const next = new Set<string>(linkSelection);
+                        if (next.has(l.id)) next.delete(l.id); else next.add(l.id);
+                        setLinkSelection(Array.from(next));
+                      } else {
+                        setLinkSelection([l.id]);
+                      }
+                    }}
+                    onContextMenu={(ev) => {
+                      ev.evt.preventDefault();
                       setLinkSelection([l.id]);
-                    }
-                  }}
-                  onContextMenu={(ev) => {
-                    ev.evt.preventDefault();
-                    setLinkSelection([l.id]);
-                    setLinkCtxMenu({ x: ev.evt.clientX, y: ev.evt.clientY, linkId: l.id });
-                  }}
-                />
-              </React.Fragment>
-            );
-          })}
-
-          {/* кросс-уровневые связи: штрихи с подписями */}
-          {(() => {
-            if (superPerfMode) return null; // в супермоде не рисуем стабы, чтобы не нагружать
-            const idSet = new Set(visibleNodes.map((n) => n.id));
-            const findNode = (id: string) => nodes.find((n) => n.id === id);
-            const parentWorld = (() => {
-              if (!currentParentId) return { x: 0, y: 0 };
-              const grp = nodes.find((n) => n.id === currentParentId) as GroupNode | undefined;
-              if (!grp) return { x: 0, y: 0 };
-              const getWorld = (n: AnyNode): { x: number; y: number } => {
-                let x = n.x, y = n.y; let p = n.parentId;
-                const visited = new Set<string>(); let hops = 0;
-                while (p && !visited.has(p) && hops < 1000) {
-                  visited.add(p);
-                  const pg = nodes.find((nn) => nn.id === p) as GroupNode | undefined; if (!pg) break;
-                  x += pg.x; y += pg.y; p = pg.parentId; hops++;
-                }
-                return { x, y };
-              };
-              return getWorld(grp);
-            })();
-            const getWorldCenter = (n: AnyNode) => {
-              let x = n.x, y = n.y; let p = n.parentId;
-              const visited = new Set<string>(); let hops = 0;
-              while (p && !visited.has(p) && hops < 1000) { const pg = nodes.find((nn) => nn.id === p) as GroupNode | undefined; if (!pg) break; visited.add(p); x += pg.x; y += pg.y; p = pg.parentId; hops++; }
-              return { x: x + n.width / 2, y: y + n.height / 2 };
-            };
-            const toLocal = (w: { x: number; y: number }) => ({ x: w.x - parentWorld.x, y: w.y - parentWorld.y });
-            const t0 = performance.now();
-            const list: React.ReactNode[] = [];
-            links.forEach((l) => {
-              const a = findNode(l.fromId); const b = findNode(l.toId);
-              if (!a || !b) return;
-              const aVisible = idSet.has(a.id); const bVisible = idSet.has(b.id);
-              // Если обе стороны проецируются на текущий уровень — отрисовано как стрелка выше
-              const aProj = projectToLevel(a.id);
-              const bProj = projectToLevel(b.id);
-              if (aProj && bProj) return;
-              if (!aVisible && !bVisible) return; // не относимся к текущему уровню
-              const visibleNode = aVisible ? a : b;
-              const hiddenNode = aVisible ? b : a;
-              // обе точки в координатах текущего уровня
-              const vWorld = getWorldCenter(visibleNode);
-              const vLocal = toLocal(vWorld);
-              const hWorld = getWorldCenter(hiddenNode);
-              const hLocal = toLocal(hWorld);
-              // направляющий вектор
-              const dx = hLocal.x - vLocal.x; const dy = hLocal.y - vLocal.y; const len = Math.hypot(dx, dy) || 1;
-              const ux = dx / len, uy = dy / len;
-              // якорим старт по границе видимого узла в сторону скрытого
-              const start = computeAnchorTowardsPoint(visibleNode, hLocal);
-              const ex = start.x + ux * 60; const ey = start.y + uy * 60; // 60px штрих
-              list.push(
-                <React.Fragment key={`stub-${l.id}`}>
-                  {/* стрелочка усеченная: направление с учетом ориентации */}
-                  {(() => {
-                    const dir = l.dir || 'one';
-                    const points = (() => {
-                      if (dir === 'both') return [start.x, start.y, ex, ey];
-                      // если from виден, рисуем от видимого наружу; иначе — к видимому внутрь
-                      return aVisible ? [start.x, start.y, ex, ey] : [ex, ey, start.x, start.y];
-                    })();
-                    return (
-                      <Arrow points={points} stroke={l.color || '#C94545'} fill={l.color || '#C94545'} strokeWidth={2} dash={[8, 6]} pointerLength={14} pointerWidth={14}
-                        perfectDrawEnabled={false}
-                        shadowColor={perfMode ? undefined : '#00000080'} shadowBlur={perfMode ? 0 : 6}
-                        hitStrokeWidth={40}
-                        onMouseEnter={(ev) => {
-                          setHoveredStub(l.id);
-                          if (showLinkHud) {
-                            const arrow = (l.dir || 'one') === 'both' ? '↔' : '→';
-                            setHoverHUD({ x: ev.evt.clientX, y: ev.evt.clientY, text: `${nodeDisplayName(a)} ${arrow} ${nodeDisplayName(b)}` });
-                          }
-                        }}
-                        onMouseMove={(ev) => {
-                          if (showLinkHud && hoveredStub === l.id) {
-                            const arrow = (l.dir || 'one') === 'both' ? '↔' : '→';
-                            setHoverHUD({ x: ev.evt.clientX, y: ev.evt.clientY, text: `${nodeDisplayName(a)} ${arrow} ${nodeDisplayName(b)}` });
-                          }
-                        }}
-                        onMouseLeave={() => { setHoveredStub((p) => (p === l.id ? null : p)); setHoverHUD(null); }} />
-                    );
-                  })()}
+                      setLinkCtxMenu({ x: ev.evt.clientX, y: ev.evt.clientY, linkId: l.id });
+                    }}
+                  />
                 </React.Fragment>
               );
-            });
-            const dt = performance.now() - t0;
-            if (dt > 20 && diag) log.warn('perf:stubs:slow', { ms: Math.round(dt), links: links.length, stubs: list.length });
-            return list;
-          })()}
+            })}
 
-          {visibleNodes.map((n) => (
-            <NodeShape
-              key={n.id}
-              node={n}
-              selected={selectionSet.has(n.id)}
-              onDragStart={() => handleNodeDragStart(n.id)}
-              onDragMove={(e) => handleNodeDragMove(n.id, e)}
-              onDragEnd={(e) => handleNodeDragEnd(n, e)}
-              onClick={(e) => { handleNodeClick(n.id, e); }}
-              onDblClick={(e) => handleNodeDblClick(n, e as unknown as KonvaEventObject<MouseEvent>)}
-              onContextMenu={(e) => {
-                e.evt.preventDefault();
-                setSelection([n.id]);
-                setCtxMenu({ x: e.evt.clientX, y: e.evt.clientY, nodeId: n.id });
-              }}
-              onHoverEnter={(ev) => {
-                const label = n.type === 'task' ? (n as TaskNode).title : n.type === 'person' ? (n as PersonNode).name : (n as GroupNode).name;
-                setHoverHUD({ x: ev.evt.clientX, y: ev.evt.clientY, text: label || '' });
-              }}
-              onHoverMove={(ev) => {
-                setHoverHUD((prev) => (prev ? { ...prev, x: ev.evt.clientX, y: ev.evt.clientY } : prev));
-              }}
-              onHoverLeave={() => setHoverHUD((prev) => (prev ? null : prev))}
-              onRefReady={(ref) => { if (ref) nodeRefsMap.current.set(n.id, ref); }}
-            />
-          ))}
+            {/* кросс-уровневые связи: штрихи с подписями */}
+            {(() => {
+              if (superPerfMode) return null; // в супермоде не рисуем стабы, чтобы не нагружать
+              const idSet = new Set(visibleNodes.map((n) => n.id));
+              const findNode = (id: string) => nodes.find((n) => n.id === id);
+              const parentWorld = (() => {
+                if (!currentParentId) return { x: 0, y: 0 };
+                const grp = nodes.find((n) => n.id === currentParentId) as GroupNode | undefined;
+                if (!grp) return { x: 0, y: 0 };
+                const getWorld = (n: AnyNode): { x: number; y: number } => {
+                  let x = n.x, y = n.y; let p = n.parentId;
+                  const visited = new Set<string>(); let hops = 0;
+                  while (p && !visited.has(p) && hops < 1000) {
+                    visited.add(p);
+                    const pg = nodes.find((nn) => nn.id === p) as GroupNode | undefined; if (!pg) break;
+                    x += pg.x; y += pg.y; p = pg.parentId; hops++;
+                  }
+                  return { x, y };
+                };
+                return getWorld(grp);
+              })();
+              const getWorldCenter = (n: AnyNode) => {
+                let x = n.x, y = n.y; let p = n.parentId;
+                const visited = new Set<string>(); let hops = 0;
+                while (p && !visited.has(p) && hops < 1000) { const pg = nodes.find((nn) => nn.id === p) as GroupNode | undefined; if (!pg) break; visited.add(p); x += pg.x; y += pg.y; p = pg.parentId; hops++; }
+                return { x: x + n.width / 2, y: y + n.height / 2 };
+              };
+              const toLocal = (w: { x: number; y: number }) => ({ x: w.x - parentWorld.x, y: w.y - parentWorld.y });
+              const t0 = performance.now();
+              const list: React.ReactNode[] = [];
+              links.forEach((l) => {
+                const a = findNode(l.fromId); const b = findNode(l.toId);
+                if (!a || !b) return;
+                const aVisible = idSet.has(a.id); const bVisible = idSet.has(b.id);
+                // Если обе стороны проецируются на текущий уровень — отрисовано как стрелка выше
+                const aProj = projectToLevel(a.id);
+                const bProj = projectToLevel(b.id);
+                if (aProj && bProj) return;
+                if (!aVisible && !bVisible) return; // не относимся к текущему уровню
+                const visibleNode = aVisible ? a : b;
+                const hiddenNode = aVisible ? b : a;
+                // обе точки в координатах текущего уровня
+                const vWorld = getWorldCenter(visibleNode);
+                const vLocal = toLocal(vWorld);
+                const hWorld = getWorldCenter(hiddenNode);
+                const hLocal = toLocal(hWorld);
+                // направляющий вектор
+                const dx = hLocal.x - vLocal.x; const dy = hLocal.y - vLocal.y; const len = Math.hypot(dx, dy) || 1;
+                const ux = dx / len, uy = dy / len;
+                // якорим старт по границе видимого узла в сторону скрытого
+                const start = computeAnchorTowardsPoint(visibleNode, hLocal);
+                const ex = start.x + ux * 60; const ey = start.y + uy * 60; // 60px штрих
+                list.push(
+                  <React.Fragment key={`stub-${l.id}`}>
+                    {/* стрелочка усеченная: направление с учетом ориентации */}
+                    {(() => {
+                      const dir = l.dir || 'one';
+                      const points = (() => {
+                        if (dir === 'both') return [start.x, start.y, ex, ey];
+                        // если from виден, рисуем от видимого наружу; иначе — к видимому внутрь
+                        return aVisible ? [start.x, start.y, ex, ey] : [ex, ey, start.x, start.y];
+                      })();
+                      return (
+                        <Arrow points={points} stroke={l.color || '#C94545'} fill={l.color || '#C94545'} strokeWidth={2} dash={[8, 6]} pointerLength={14} pointerWidth={14}
+                          perfectDrawEnabled={false}
+                          shadowColor={perfMode ? undefined : '#00000080'} shadowBlur={perfMode ? 0 : 6}
+                          hitStrokeWidth={40}
+                          onMouseEnter={(ev) => {
+                            setHoveredStub(l.id);
+                            if (showLinkHud) {
+                              const arrow = (l.dir || 'one') === 'both' ? '↔' : '→';
+                              setHoverHUD({ x: ev.evt.clientX, y: ev.evt.clientY, text: `${nodeDisplayName(a)} ${arrow} ${nodeDisplayName(b)}` });
+                            }
+                          }}
+                          onMouseMove={(ev) => {
+                            if (showLinkHud && hoveredStub === l.id) {
+                              const arrow = (l.dir || 'one') === 'both' ? '↔' : '→';
+                              setHoverHUD({ x: ev.evt.clientX, y: ev.evt.clientY, text: `${nodeDisplayName(a)} ${arrow} ${nodeDisplayName(b)}` });
+                            }
+                          }}
+                          onMouseLeave={() => { setHoveredStub((p) => (p === l.id ? null : p)); setHoverHUD(null); }} />
+                      );
+                    })()}
+                  </React.Fragment>
+                );
+              });
+              const dt = performance.now() - t0;
+              if (dt > 20 && diag) log.warn('perf:stubs:slow', { ms: Math.round(dt), links: links.length, stubs: list.length });
+              return list;
+            })()}
+
+            {visibleNodes.map((n) => (
+              <NodeShape
+                key={n.id}
+                node={n}
+                draggable={tool !== 'link'}
+                selected={selectionSet.has(n.id)}
+                onDragStart={() => handleNodeDragStart(n.id)}
+                onDragMove={(e) => handleNodeDragMove(n.id, e)}
+                onDragEnd={(e) => handleNodeDragEnd(n, e)}
+                onClick={(e) => { handleNodeClick(n.id, e); }}
+                onDblClick={(e) => handleNodeDblClick(n, e as unknown as KonvaEventObject<MouseEvent>)}
+                onContextMenu={(e) => {
+                  e.evt.preventDefault();
+                  setSelection([n.id]);
+                  setCtxMenu({ x: e.evt.clientX, y: e.evt.clientY, nodeId: n.id });
+                }}
+                onHoverEnter={(ev) => {
+                  const label = n.type === 'task' ? (n as TaskNode).title : n.type === 'person' ? (n as PersonNode).name : (n as GroupNode).name;
+                  setHoverHUD({ x: ev.evt.clientX, y: ev.evt.clientY, text: label || '' });
+                }}
+                onHoverMove={(ev) => {
+                  setHoverHUD((prev) => (prev ? { ...prev, x: ev.evt.clientX, y: ev.evt.clientY } : prev));
+                }}
+                onHoverLeave={() => setHoverHUD((prev) => (prev ? null : prev))}
+                onRefReady={(ref) => { if (ref) nodeRefsMap.current.set(n.id, ref); }}
+              />
+            ))}
           </KonvaGroup>
         </Layer>
       </Stage>
@@ -1426,7 +1465,7 @@ export const BoardCanvas: React.FC = () => {
               <span style={{ opacity: 0.8 }}>Куда связать:</span>
               <input
                 ref={linkSearchInputRef}
-                value={linkSearchTerm}
+                defaultValue={linkSearchTerm}
                 onChange={(e) => { setLinkSearchTerm(e.target.value); setLinkSearchIndex(0); }}
                 onKeyDown={(e) => {
                   if (e.key === 'ArrowDown') { e.preventDefault(); setLinkSearchIndex((i) => Math.min(i + 1, Math.max(0, linkSearchResults.length - 1))); }
@@ -1479,14 +1518,38 @@ export const BoardCanvas: React.FC = () => {
           >
             Настройки
           </div>
+          {ctxNode.parentId ? (
+            <button style={{ display: 'block', width: '100%', marginBottom: 8, background: '#444', border: 'none', padding: '6px', borderRadius: 4, cursor: 'pointer', color: '#fff' }} onClick={async () => {
+              const all = useAppStore.getState().nodes;
+              const parent = all.find((n) => n.id === ctxNode.parentId) as GroupNode | undefined;
+              if (!parent) return;
+              const newParentId: string | null = parent.parentId ?? null;
+              // координаты на уровне выше = локальные + координаты группы
+              const baseX = ctxNode.x + parent.x;
+              const baseY = ctxNode.y + parent.y;
+              const spot = findFreeSpot(baseX, baseY, ctxNode.width, ctxNode.height, newParentId);
+              await useAppStore.getState().updateNode(ctxNode.id, { parentId: newParentId, x: spot.x, y: spot.y });
+              setCtxMenu(null);
+            }}>⬆ Вывести из группы</button>
+          ) : null}
           {ctxNode.type === 'task' ? (
             <div>
               <div style={{ fontWeight: 600, marginBottom: 6 }}>Задача</div>
               <label style={{ display: 'block', marginBottom: 6 }}>Заголовок
-                <input style={{ width: '100%' }} value={(ctxNode as TaskNode).title} onChange={(e) => { void useAppStore.getState().updateNode(ctxNode.id, { title: e.target.value }); }} placeholder="Название задачи" />
+                <input
+                  style={{ width: '100%' }}
+                  defaultValue={(ctxNode as TaskNode).title}
+                  onBlur={(e) => { void useAppStore.getState().updateNode(ctxNode.id, { title: e.target.value }); }}
+                  placeholder="Название задачи"
+                />
               </label>
               <label style={{ display: 'block', marginBottom: 6 }}>Описание
-                <textarea style={{ width: '100%', minHeight: 60 }} value={(ctxNode as TaskNode).description || ''} onChange={(e) => { const v = e.target.value || undefined; void useAppStore.getState().updateNode(ctxNode.id, { description: v }); }} placeholder="Описание (необязательно)" />
+                <textarea
+                  style={{ width: '100%', minHeight: 60 }}
+                  defaultValue={(ctxNode as TaskNode).description || ''}
+                  onBlur={(e) => { const v = e.target.value || undefined; void useAppStore.getState().updateNode(ctxNode.id, { description: v }); }}
+                  placeholder="Описание (необязательно)"
+                />
               </label>
               <label style={{ display: 'block', marginBottom: 6 }}>Цвет
                 <input type="color" style={{ width: '100%' }} value={(ctxNode as TaskNode).color || '#E8D8A6'} onChange={(e) => { void useAppStore.getState().updateNode(ctxNode.id, { color: e.target.value }); }} />
@@ -1610,7 +1673,7 @@ export const BoardCanvas: React.FC = () => {
                           placeholder="YYYY-MM-DD"
                           maxLength={10}
                           style={{ background: '#2a2a2a', color: '#fff', border: '1px solid #444', borderRadius: 4, padding: '4px 6px' }}
-                          value={(() => { const r = (ctxNode as TaskNode).recurrence as Recurrence | undefined; return r && r.kind === 'interval' ? r.anchorDate.slice(0,10) : todayYMD(); })()}
+                          value={(() => { const r = (ctxNode as TaskNode).recurrence as Recurrence | undefined; return r && r.kind === 'interval' ? r.anchorDate.slice(0, 10) : todayYMD(); })()}
                           onChange={(e) => {
                             const raw = e.target.value;
                             const curr = (ctxNode as TaskNode).recurrence as Recurrence | undefined;
@@ -1636,7 +1699,7 @@ export const BoardCanvas: React.FC = () => {
                 </div>
               ) : null}
               <label style={{ display: 'block', marginBottom: 6 }}>Срочность
-                <select style={{ width: '100%' }} value={(ctxNode as TaskNode).priority || 'med'} onChange={(e) => { const val = e.target.value as 'low'|'med'|'high'; void useAppStore.getState().updateNode(ctxNode.id, { priority: val }); }}>
+                <select style={{ width: '100%' }} value={(ctxNode as TaskNode).priority || 'med'} onChange={(e) => { const val = e.target.value as 'low' | 'med' | 'high'; void useAppStore.getState().updateNode(ctxNode.id, { priority: val }); }}>
                   <option value="low">Низкая</option>
                   <option value="med">Средняя</option>
                   <option value="high">Высокая</option>
@@ -1660,7 +1723,7 @@ export const BoardCanvas: React.FC = () => {
                         const d = String(today.getDate()).padStart(2, '0');
                         const nextDayYMD = `${y}-${m}-${d}`;
                         const nextDue = toIsoUTCFromYMD(nextDayYMD);
-                        patch = { 
+                        patch = {
                           dueDate: nextDue,
                           completedAt: Date.now(),
                           subtasks: Array.isArray(t.subtasks)
@@ -1671,7 +1734,7 @@ export const BoardCanvas: React.FC = () => {
                         log.info('everyDay:completed', { id: t.id, nextDue });
                         return;
                       }
-                      
+
                       const ask = window.prompt('Дата выполнения (YYYY-MM-DD или YYYY-MM-DD HH:mm). Пусто — сейчас:');
                       let completedAt = Date.now();
                       if (ask && ask.trim()) {
@@ -1753,29 +1816,23 @@ export const BoardCanvas: React.FC = () => {
                 </select>
               </label>
               <button onClick={() => { if (window.confirm('Удалить выбранное?')) { void deleteSelection(); setCtxMenu(null); } }} style={{ display: 'block', width: '100%', marginTop: 8 }}>Удалить</button>
-              {ctxNode.parentId ? (
-                <button style={{ display: 'block', width: '100%', marginTop: 6 }} onClick={async () => {
-                  const all = useAppStore.getState().nodes;
-                  const parent = all.find((n) => n.id === ctxNode.parentId) as GroupNode | undefined;
-                  if (!parent) return;
-                  const newParentId: string | null = parent.parentId ?? null;
-                  // координаты на уровне выше = локальные + координаты группы
-                  const baseX = (ctxNode as TaskNode).x + parent.x;
-                  const baseY = (ctxNode as TaskNode).y + parent.y;
-                  const spot = findFreeSpot(baseX, baseY, (ctxNode as TaskNode).width, (ctxNode as TaskNode).height, newParentId);
-                  await useAppStore.getState().updateNode(ctxNode.id, { parentId: newParentId, x: spot.x, y: spot.y });
-                  setCtxMenu(null);
-                }}>Вывести из группы</button>
-              ) : null}
             </div>
           ) : ctxNode.type === 'group' ? (
             <div>
               <div style={{ fontWeight: 600, marginBottom: 6 }}>Группа</div>
               <label style={{ display: 'block', marginBottom: 6 }}>Название
-                <input style={{ width: '100%' }} value={(ctxNode as GroupNode).name} onChange={(e) => { void useAppStore.getState().updateNode(ctxNode.id, { name: e.target.value }); }} />
+                <input
+                  style={{ width: '100%' }}
+                  defaultValue={(ctxNode as GroupNode).name}
+                  onBlur={(e) => { void useAppStore.getState().updateNode(ctxNode.id, { name: e.target.value }); }}
+                />
               </label>
               <label style={{ display: 'block', marginBottom: 6 }}>Описание
-                <textarea style={{ width: '100%' }} value={(ctxNode as GroupNode).description || ''} onChange={(e) => { void useAppStore.getState().updateNode(ctxNode.id, { description: e.target.value }); }} />
+                <textarea
+                  style={{ width: '100%' }}
+                  defaultValue={(ctxNode as GroupNode).description || ''}
+                  onBlur={(e) => { void useAppStore.getState().updateNode(ctxNode.id, { description: e.target.value }); }}
+                />
               </label>
               <label style={{ display: 'block', marginBottom: 6 }}>Цвет
                 <input type="color" style={{ width: '100%' }} value={(ctxNode as GroupNode).color || '#AEC6CF'} onChange={(e) => { void useAppStore.getState().updateNode(ctxNode.id, { color: e.target.value }); }} />
@@ -1819,38 +1876,46 @@ export const BoardCanvas: React.FC = () => {
                 </label>
               </fieldset>
               <button onClick={() => { if (window.confirm('Удалить выбранное?')) { void deleteSelection(); setCtxMenu(null); } }} style={{ display: 'block', width: '100%', marginTop: 8 }}>Удалить</button>
-              {ctxNode.parentId ? (
-                <button style={{ display: 'block', width: '100%', marginTop: 6 }} onClick={async () => {
-                  const all = useAppStore.getState().nodes;
-                  const parent = all.find((n) => n.id === ctxNode.parentId) as GroupNode | undefined;
-                  if (!parent) return;
-                  const newParentId: string | null = parent.parentId ?? null;
-                  const baseX = (ctxNode as GroupNode).x + parent.x;
-                  const baseY = (ctxNode as GroupNode).y + parent.y;
-                  const size = Math.max((ctxNode as GroupNode).width, (ctxNode as GroupNode).height);
-                  const spot = findFreeSpot(baseX, baseY, size, size, newParentId);
-                  await useAppStore.getState().updateNode(ctxNode.id, { parentId: newParentId, x: spot.x, y: spot.y });
-                  setCtxMenu(null);
-                }}>Вывести из группы</button>
-              ) : null}
             </div>
           ) : ctxNode.type === 'person' ? (
             <div style={{ marginTop: 8 }}>
               <div style={{ fontWeight: 600, marginBottom: 6 }}>Контакты</div>
               <label style={{ display: 'block', marginBottom: 4 }}>Имя
-                <input style={{ width: '100%' }} value={(ctxNode as PersonNode).name || ''} onChange={(e) => { void useAppStore.getState().updateNode(ctxNode.id, { name: e.target.value }); }} placeholder="Имя" />
+                <input
+                  style={{ width: '100%' }}
+                  defaultValue={(ctxNode as PersonNode).name || ''}
+                  onBlur={(e) => { void useAppStore.getState().updateNode(ctxNode.id, { name: e.target.value }); }}
+                  placeholder="Имя"
+                />
               </label>
               <label style={{ display: 'block', marginBottom: 4 }}>Email
-                <input style={{ width: '100%' }} value={(ctxNode as PersonNode).contacts?.email || ''} onChange={(e) => { void useAppStore.getState().updateNode(ctxNode.id, { contacts: { ...(ctxNode as PersonNode).contacts, email: e.target.value } }); }} />
+                <input
+                  style={{ width: '100%' }}
+                  defaultValue={(ctxNode as PersonNode).contacts?.email || ''}
+                  onBlur={(e) => { void useAppStore.getState().updateNode(ctxNode.id, { contacts: { ...(ctxNode as PersonNode).contacts, email: e.target.value } }); }}
+                />
               </label>
               <label style={{ display: 'block', marginBottom: 4 }}>Телефон
-                <input style={{ width: '100%' }} value={(ctxNode as PersonNode).contacts?.phone || ''} onChange={(e) => { void useAppStore.getState().updateNode(ctxNode.id, { contacts: { ...(ctxNode as PersonNode).contacts, phone: e.target.value } }); }} />
+                <input
+                  style={{ width: '100%' }}
+                  defaultValue={(ctxNode as PersonNode).contacts?.phone || ''}
+                  onBlur={(e) => { void useAppStore.getState().updateNode(ctxNode.id, { contacts: { ...(ctxNode as PersonNode).contacts, phone: e.target.value } }); }}
+                />
               </label>
               <label style={{ display: 'block', marginBottom: 4 }}>Заметки
-                <textarea style={{ width: '100%' }} value={(ctxNode as PersonNode).contacts?.notes || ''} onChange={(e) => { void useAppStore.getState().updateNode(ctxNode.id, { contacts: { ...(ctxNode as PersonNode).contacts, notes: e.target.value } }); }} />
+                <textarea
+                  style={{ width: '100%' }}
+                  defaultValue={(ctxNode as PersonNode).contacts?.notes || ''}
+                  onBlur={(e) => { void useAppStore.getState().updateNode(ctxNode.id, { contacts: { ...(ctxNode as PersonNode).contacts, notes: e.target.value } }); }}
+                />
               </label>
               <label style={{ display: 'block', marginBottom: 4 }}>Фото (URL)
-                <input style={{ width: '100%' }} value={(ctxNode as PersonNode).avatarUrl || ''} onChange={(e) => { void useAppStore.getState().updateNode(ctxNode.id, { avatarUrl: e.target.value }); }} placeholder="https://..." />
+                <input
+                  style={{ width: '100%' }}
+                  defaultValue={(ctxNode as PersonNode).avatarUrl || ''}
+                  onBlur={(e) => { void useAppStore.getState().updateNode(ctxNode.id, { avatarUrl: e.target.value }); }}
+                  placeholder="https://..."
+                />
               </label>
               <label className="radio" style={{ marginBottom: 6 }}>
                 <input
@@ -1870,20 +1935,6 @@ export const BoardCanvas: React.FC = () => {
                 }} />
               </label>
               <button onClick={() => { if (window.confirm('Удалить выбранное?')) { void deleteSelection(); setCtxMenu(null); } }} style={{ display: 'block', width: '100%', marginTop: 8 }}>Удалить</button>
-              {ctxNode.parentId ? (
-                <button style={{ display: 'block', width: '100%', marginTop: 6 }} onClick={async () => {
-                  const all = useAppStore.getState().nodes;
-                  const parent = all.find((n) => n.id === ctxNode.parentId) as GroupNode | undefined;
-                  if (!parent) return;
-                  const newParentId: string | null = parent.parentId ?? null;
-                  const baseX = (ctxNode as PersonNode).x + parent.x;
-                  const baseY = (ctxNode as PersonNode).y + parent.y;
-                  const size = Math.max((ctxNode as PersonNode).width, (ctxNode as PersonNode).height);
-                  const spot = findFreeSpot(baseX, baseY, size, size, newParentId);
-                  await useAppStore.getState().updateNode(ctxNode.id, { parentId: newParentId, x: spot.x, y: spot.y });
-                  setCtxMenu(null);
-                }}>Вывести из группы</button>
-              ) : null}
             </div>
           ) : null}
           <div style={{ textAlign: 'right', marginTop: 6 }}>
@@ -1925,6 +1976,13 @@ export const BoardCanvas: React.FC = () => {
               <option value="both">Двунаправленная</option>
             </select>
           </label>
+          <button style={{ display: 'block', width: '100%', marginBottom: 6 }} onClick={() => {
+            const l = useAppStore.getState().links.find((x) => x.id === linkCtxMenu.linkId);
+            if (l) {
+              void useAppStore.getState().updateLink(linkCtxMenu.linkId, { fromId: l.toId, toId: l.fromId });
+              setLinkCtxMenu(null);
+            }
+          }}>Развернуть (Swap)</button>
           <div style={{ textAlign: 'right', marginTop: 6 }}>
             <button onClick={() => setLinkCtxMenu(null)}>Закрыть</button>
           </div>
@@ -1969,7 +2027,8 @@ const NodeShape = React.memo<{
   onHoverMove?: (e: KonvaEventObject<MouseEvent>) => void;
   onHoverLeave?: () => void;
   onRefReady?: (ref: any) => void;
-}>(({ node, selected, onDragStart, onDragMove, onDragEnd, onClick, onDblClick, onContextMenu, onHoverEnter, onHoverMove, onHoverLeave, onRefReady }) => {
+  draggable?: boolean;
+}>(({ node, selected, onDragStart, onDragMove, onDragEnd, onClick, onDblClick, onContextMenu, onHoverEnter, onHoverMove, onHoverLeave, onRefReady, draggable = true }) => {
   const isTask = node.type === 'task';
   const isGroup = node.type === 'group';
   const isPerson = node.type === 'person';
@@ -1977,18 +2036,24 @@ const NodeShape = React.memo<{
   const multiResizeRef = useRef<Map<string, { w: number; h: number }> | null>(null);
   const personAvatarUrl = node.type === 'person' ? (node as PersonNode).avatarUrl : undefined;
   const img = useHtmlImage(personAvatarUrl);
-  
+
   // ОПТИМИЗАЦИЯ: кэшируем узел как картинку для быстрого рендера
   const groupRef = useRef<any>(null);
   const [isDragging, setIsDragging] = useState(false);
-  
+
   const handleDragStartWrapper = useCallback((e: KonvaEventObject<DragEvent>) => {
+    // Читаем состояние напрямую из стора, чтобы избежать проблем с замыканиями и пропсами
+    const currentTool = useAppStore.getState().tool;
+    if (currentTool === 'link' || !draggable) {
+      e.target.stopDrag();
+      return;
+    }
     setIsDragging(true);
     // Отключаем кэш во время перетаскивания
     if (groupRef.current) groupRef.current.clearCache();
     onDragStart(e);
-  }, [onDragStart]);
-  
+  }, [onDragStart, draggable]);
+
   const handleDragEndWrapper = useCallback((e: KonvaEventObject<DragEvent>) => {
     setIsDragging(false);
     onDragEnd(e);
@@ -1997,17 +2062,24 @@ const NodeShape = React.memo<{
       if (groupRef.current) groupRef.current.cache();
     }, 50);
   }, [onDragEnd]);
-  
+
+  // Принудительно синхронизируем draggable статус, так как кэширование может мешать обновлению пропов
+  useLayoutEffect(() => {
+    if (groupRef.current) {
+      groupRef.current.draggable(draggable);
+    }
+  }, [draggable]);
+
   useEffect(() => {
     // Кэшируем узел после монтирования (превращаем в картинку)
     if (groupRef.current && !isDragging && !selected) {
       groupRef.current.cache();
     }
-    
+
     return () => {
       if (groupRef.current) groupRef.current.clearCache();
     };
-  }, [isDragging, selected]);
+  }, [isDragging, selected, draggable]);
 
   if (isTask) {
     const t = node as TaskNode;
@@ -2020,14 +2092,14 @@ const NodeShape = React.memo<{
     const fs = typeof t.textSize === 'number' ? t.textSize : estimateTaskFont(textStr, baseFs, contentW, contentH, 1.15);
     return (
       <KonvaGroup
-        ref={(ref) => { 
+        ref={(ref) => {
           groupRef.current = ref;
-          if (ref && onRefReady) onRefReady(ref); 
+          if (ref && onRefReady) onRefReady(ref);
         }}
         x={t.x}
         y={t.y}
         opacity={t.isActual === false ? 0.35 : 1}
-        draggable
+        draggable={draggable}
         onDragStart={handleDragStartWrapper}
         onDragMove={onDragMove}
         onDragEnd={handleDragEndWrapper}
@@ -2168,10 +2240,10 @@ const NodeShape = React.memo<{
         x={g.x}
         y={g.y}
         opacity={g.isActual === false ? 0.35 : 1}
-        draggable
-        onDragStart={onDragStart}
+        draggable={draggable}
+        onDragStart={handleDragStartWrapper}
         onDragMove={onDragMove}
-        onDragEnd={onDragEnd}
+        onDragEnd={handleDragEndWrapper}
         onClick={(e) => onClick(e as unknown as KonvaEventObject<MouseEvent>)}
         onDblClick={(e) => onDblClick(e as unknown as KonvaEventObject<MouseEvent>)}
         onDblTap={() => onDblClick({} as KonvaEventObject<MouseEvent>)}
@@ -2291,10 +2363,10 @@ const NodeShape = React.memo<{
         x={p.x}
         y={p.y}
         opacity={p.isActual === false ? 0.35 : 1}
-        draggable
-        onDragStart={onDragStart}
+        draggable={draggable}
+        onDragStart={handleDragStartWrapper}
         onDragMove={onDragMove}
-        onDragEnd={onDragEnd}
+        onDragEnd={handleDragEndWrapper}
         onClick={(e) => onClick(e as unknown as KonvaEventObject<MouseEvent>)}
         onDblClick={(e) => onDblClick(e as unknown as KonvaEventObject<MouseEvent>)}
         onDblTap={() => onDblClick({} as KonvaEventObject<MouseEvent>)}
