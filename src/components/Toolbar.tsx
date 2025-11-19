@@ -503,6 +503,10 @@ export const Toolbar: React.FC = () => {
         <Link to="/games" className="tool-link" title="Игры" style={{ padding: 8, minWidth: 42, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>🎮</Link>
         <Link to="/purchases" className="tool-link" title="Покупки" style={{ padding: 8, minWidth: 42, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>🛒</Link>
       </div>
+      {/* Группа: Граф */}
+      <div className="tool-group">
+        <Link to="/graph" className="tool-link" title="Граф задач" style={{ padding: 8, minWidth: 42, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>🕸️</Link>
+      </div>
       {/* Группа: История и Вид */}
       <div className="tool-group">
         <button className="tool-btn" title="Отменить (Cmd/Ctrl+Z)" onClick={() => { void undo(); }}>↶</button>

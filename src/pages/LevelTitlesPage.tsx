@@ -141,7 +141,6 @@ export const LevelTitlesPage: React.FC = () => {
                     type="text"
                     value={titles[lvl] || ''}
                     onChange={(e) => handleTitleChange(lvl, e.target.value)}
-                    onBlur={() => handleSave(lvl)}
                     placeholder={`Название уровня ${lvl}...`}
                     style={{
                       flex: 1,
