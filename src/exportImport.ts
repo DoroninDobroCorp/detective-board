@@ -50,7 +50,8 @@ async function importGamificationData(
   books: BookItem[],
   movies: MovieItem[],
   games: GameItem[],
-  purchases: PurchaseItem[]
+  purchases: PurchaseItem[],
+  merge: boolean = false
 ): Promise<void> {
   if (gamificationData === undefined) {
     log.info('import:gamification:skipped');
@@ -58,8 +59,59 @@ async function importGamificationData(
   }
 
   try {
-    const gamif = gamificationData as any;
+    let gamif = gamificationData as any;
     
+    if (merge) {
+      try {
+        const currentRaw = localStorage.getItem('GAMIFICATION_STATE_V1');
+        if (currentRaw) {
+          const parsed = JSON.parse(currentRaw);
+          const current = parsed.state || parsed;
+          
+          // Merge logic:
+          // 1. XP/Level/History: Take the state with higher XP to avoid double counting or inflation
+          // 2. Collections (Achievements, ProcessedTasks, etc): Union
+          
+          const useImportedXp = (gamif.xp || 0) > (current.xp || 0);
+          
+          const mergedState = {
+            xp: useImportedXp ? gamif.xp : current.xp,
+            level: useImportedXp ? gamif.level : current.level,
+            xpHistory: useImportedXp ? gamif.xpHistory : current.xpHistory,
+            // Union of completions (by ID)
+            completions: [
+              ...(current.completions || []),
+              ...(gamif.completions || [])
+            ].filter((v, i, a) => a.findIndex(t => t.id === v.id) === i),
+            // Union of processedTasks
+            processedTasks: { ...(current.processedTasks || {}), ...(gamif.processedTasks || {}) },
+            // Union of achievements (by ID)
+            achievements: [
+              ...(current.achievements || []),
+              ...(gamif.achievements || [])
+            ].filter((v, i, a) => a.findIndex(t => t.id === v.id) === i),
+            // Union of levelTitles
+            levelTitles: { ...(current.levelTitles || {}), ...(gamif.levelTitles || {}) },
+            // Union of claimedBonuses
+            claimedBonuses: { ...(current.claimedBonuses || {}), ...(gamif.claimedBonuses || {}) },
+            // Pending: take from winner or merge? Winner seems safer
+            pendingLevelUps: useImportedXp ? gamif.pendingLevelUps : current.pendingLevelUps,
+            pendingManualCandidates: useImportedXp ? gamif.pendingManualCandidates : current.pendingManualCandidates,
+          };
+          
+          gamif = mergedState;
+          log.info('import:gamification:merged', { 
+            useImportedXp, 
+            finalXp: gamif.xp,
+            achievements: gamif.achievements.length 
+          });
+        }
+      } catch (mergeErr) {
+        log.warn('import:gamification:merge-failed', { error: String(mergeErr) });
+        // Fallback to using imported data as is
+      }
+    }
+
     // Автопочинка 1: очищаем pendingManualCandidates чтобы избежать дубликатов при импорте
     if (gamif.pendingManualCandidates) {
       gamif.pendingManualCandidates = [];
@@ -324,13 +376,28 @@ export async function importBackup(file: File, mode: 'replace' | 'merge' = 'repl
   if (data.wellbeing) {
     try {
       if (data.wellbeing.raw !== undefined) {
-        localStorage.setItem('WB_RAW_BY_DAY', JSON.stringify(data.wellbeing.raw));
+        if (mode === 'merge') {
+          const current = JSON.parse(localStorage.getItem('WB_RAW_BY_DAY') || '{}');
+          localStorage.setItem('WB_RAW_BY_DAY', JSON.stringify({ ...current, ...(data.wellbeing.raw as any) }));
+        } else {
+          localStorage.setItem('WB_RAW_BY_DAY', JSON.stringify(data.wellbeing.raw));
+        }
       }
       if (data.wellbeing.daily !== undefined) {
-        localStorage.setItem('WB_DAY_AVG_BY_DAY', JSON.stringify(data.wellbeing.daily));
+        if (mode === 'merge') {
+          const current = JSON.parse(localStorage.getItem('WB_DAY_AVG_BY_DAY') || '{}');
+          localStorage.setItem('WB_DAY_AVG_BY_DAY', JSON.stringify({ ...current, ...(data.wellbeing.daily as any) }));
+        } else {
+          localStorage.setItem('WB_DAY_AVG_BY_DAY', JSON.stringify(data.wellbeing.daily));
+        }
       }
       if (data.wellbeing.monthly !== undefined) {
-        localStorage.setItem('WB_MONTH_AVG_BY_MONTH', JSON.stringify(data.wellbeing.monthly));
+        if (mode === 'merge') {
+          const current = JSON.parse(localStorage.getItem('WB_MONTH_AVG_BY_MONTH') || '{}');
+          localStorage.setItem('WB_MONTH_AVG_BY_MONTH', JSON.stringify({ ...current, ...(data.wellbeing.monthly as any) }));
+        } else {
+          localStorage.setItem('WB_MONTH_AVG_BY_MONTH', JSON.stringify(data.wellbeing.monthly));
+        }
       }
       log.info('import:wellbeing:done');
     } catch (err) {
@@ -341,6 +408,8 @@ export async function importBackup(file: File, mode: 'replace' | 'merge' = 'repl
   // Импортируем данные ассистента в localStorage
   if (data.assistant) {
     try {
+      // Scalar values are overwritten even in merge, or we could keep existing if present?
+      // Usually "Merge" means add/update. If I import settings, I probably want them applied.
       if (data.assistant.savedInfo !== undefined) {
         localStorage.setItem('ASSISTANT_SAVED_INFO_V1', data.assistant.savedInfo);
       }
@@ -355,7 +424,31 @@ export async function importBackup(file: File, mode: 'replace' | 'merge' = 'repl
       }
       if (data.assistant.messages) {
         for (const [dateKey, messages] of Object.entries(data.assistant.messages)) {
-          localStorage.setItem(`ASSISTANT_MESSAGES_V2:${dateKey}`, JSON.stringify(messages));
+          // Messages are arrays? or Objects?
+          // Type definition says Record<string, unknown>
+          // But usage suggests they are chat history.
+          // If strict merge, we might want to append messages? 
+          // For now, let's assume dateKey granularity is enough.
+          // But we should check if we already have messages for this day.
+          const key = `ASSISTANT_MESSAGES_V2:${dateKey}`;
+          if (mode === 'merge') {
+             // If we really wanted to merge chat history, we'd need to parse arrays.
+             // But overwriting a day's history with backup seems acceptable or standard "last write wins".
+             // Safer: if exists, keep local? Or overwrite?
+             // Let's overwrite for now as it matches "Import" semantics usually.
+             // But wait, if I merge my phone (today) to PC (yesterday), I want today's messages.
+             // If I merge PC (yesterday) to Phone (today), I DON'T want to lose today's messages.
+             if (!localStorage.getItem(key)) {
+                localStorage.setItem(key, JSON.stringify(messages));
+             } else {
+                // Conflict. Simple strategy: keep local in merge? or append?
+                // Append is hard without knowing structure.
+                // Let's keep local to be safe against data loss.
+                log.info('import:assistant:merge-skip-existing', { dateKey });
+             }
+          } else {
+            localStorage.setItem(key, JSON.stringify(messages));
+          }
         }
       }
       log.info('import:assistant:done');
@@ -413,14 +506,47 @@ export async function importBackup(file: File, mode: 'replace' | 'merge' = 'repl
   } else {
     // merge: просто дозаписываем id-совместимые сущности, конфликты по id заменяются (put)
     await db.transaction('rw', [db.nodes, db.links, db.users, db.books, db.movies, db.games, db.purchases, db.diary], async () => {
-      if (nodes.length) await db.nodes.bulkPut(nodes);
+      // Smart merge for Nodes (check updatedAt)
+      if (nodes.length) {
+        const ids = nodes.map(n => n.id);
+        const existingNodes = await db.nodes.bulkGet(ids);
+        const nodesToPut: AnyNode[] = [];
+        for (let i = 0; i < nodes.length; i++) {
+          const incoming = nodes[i];
+          const local = existingNodes[i];
+          if (!local || incoming.updatedAt > local.updatedAt) {
+            nodesToPut.push(incoming);
+          } else {
+            // Local is newer, keep it.
+          }
+        }
+        if (nodesToPut.length) await db.nodes.bulkPut(nodesToPut);
+        log.info('import:merge:nodes', { total: nodes.length, merged: nodesToPut.length });
+      }
+
+      // Smart merge for Diary (check updatedAt)
+      if (diary.length) {
+        const ids = diary.map(d => d.id);
+        const existingDiary = await db.diary.bulkGet(ids);
+        const diaryToPut: DiaryEntry[] = [];
+        for (let i = 0; i < diary.length; i++) {
+          const incoming = diary[i];
+          const local = existingDiary[i];
+          if (!local || incoming.updatedAt > local.updatedAt) {
+            diaryToPut.push(incoming);
+          }
+        }
+        if (diaryToPut.length) await db.diary.bulkPut(diaryToPut);
+        log.info('import:merge:diary', { total: diary.length, merged: diaryToPut.length });
+      }
+
+      // Standard merge for others (last write wins / backup wins)
       if (links.length) await db.links.bulkPut(links);
       if (users.length) await db.users.bulkPut(users);
       if (books.length) await db.books.bulkPut(books);
       if (movies.length) await db.movies.bulkPut(movies);
       if (games.length) await db.games.bulkPut(games);
       if (purchases.length) await db.purchases.bulkPut(purchases);
-      if (diary.length) await db.diary.bulkPut(diary);
     });
     // синхронизируем стор с БД
     const [n2, l2, u2] = await Promise.all([db.nodes.toArray(), db.links.toArray(), db.users.toArray()]);
@@ -442,7 +568,7 @@ export async function importBackup(file: File, mode: 'replace' | 'merge' = 'repl
       db.games.toArray(),
       db.purchases.toArray(),
     ]);
-    await importGamificationData(data.gamification, n2, books2, movies2, games2, purchases2);
+    await importGamificationData(data.gamification, n2, books2, movies2, games2, purchases2, true);
     
     log.info('import:merge:done', { nodes: nodes.length, links: links.length, users: users.length, books: books.length, movies: movies.length, games: games.length, purchases: purchases.length, diary: diary.length });
   }
