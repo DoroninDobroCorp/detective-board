@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Routes, Route, useLocation } from 'react-router-dom';
 import { useAppStore } from './store';
 import { useGamificationStore } from './gamification';
+import { syncToServer, loadFromServer } from './sync';
 import { BoardCanvas } from './components/BoardCanvas';
 import { Toolbar } from './components/Toolbar';
 import { InspectorPanel } from './components/InspectorPanel';
@@ -40,6 +41,7 @@ function BoardPage() {
 function App() {
   const initialized = useAppStore((s) => s.initialized);
   const init = useAppStore((s) => s.init);
+  const gamificationState = useGamificationStore();
   const log = getLogger('App');
   
   // Expose stores for e2e tests immediately
@@ -111,7 +113,27 @@ function App() {
     }
   }, [init, initialized, log]);
   const loc = useLocation();
+  
   useEffect(() => {
+    if (initialized) {
+      syncToServer({
+        localStorage: {
+          GAMIFICATION_STATE_V1: gamificationState
+        }
+      });
+    }
+  }, [gamificationState, initialized]);
+
+  useEffect(() => {
+    (async () => {
+      const serverData = await loadFromServer();
+      if (serverData?.localStorage?.GAMIFICATION_STATE_V1) {
+        log.info('init:server-data-found');
+        useGamificationStore.setState(serverData.localStorage.GAMIFICATION_STATE_V1);
+      }
+    })();
+  }, []);
+useEffect(() => {
     log.info('route', { path: loc.pathname });
   }, [loc.pathname, log]);
   return (
