@@ -1,0 +1,17 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# JS/TS
+*.js text eol=lf
+*.ts text eol=lf
+*.json text eol=lf
+
+# Documentation
+*.md text eol=lf
+*.txt text eol=lf
+
+# Images
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
