@@ -288,7 +288,7 @@ function buildDemoTextResponse(message: string | undefined): { text: string; mod
   ];
   if (wantsSave) {
     lines.push('Фиксирую изменения в профиле пользователя и сохраняю их.');
-    lines.push('SAVE_JSON: { "about_me": "Родился в Грозном. Гражданство России. Жена и дети — украинцы.", "environment": "Черногория, город Бар" }');
+    lines.push('SAVE_JSON: { "about_me": "Example user profile", "environment": "Demo environment" }');
   } else {
     lines.push('Пока просто отвечаю и жду конкретных указаний, что сохранить.');
   }
@@ -304,10 +304,10 @@ export default defineConfig(({ mode }) => {
   const TELEGRAM_BOT_TOKEN = env.TELEGRAM_BOT_TOKEN;
 
   return {
-    base: '/detective-board/',
+    base: '/',
     server: {
       middlewareMode: false,
-      allowedHosts: ['ibet.team', 'localhost'],
+      allowedHosts: ['localhost'],
     },
     plugins: [
       react(),
@@ -356,7 +356,7 @@ export default defineConfig(({ mode }) => {
               if (message && message.startsWith('[TEST_SAVE_JSON]')) {
                 const text = [
                   'Ассистент: Обновляю сохранённую информацию согласно вашему запросу.',
-                  'SAVE_JSON: { "about_me": "Родился в Грозном. Гражданство России. Жена и дети — украинцы.", "environment": "Черногория, город Бар" }'
+                  'SAVE_JSON: { "about_me": "Example user profile", "environment": "Demo environment" }'
                 ].join('\n');
                 res.statusCode = 200;
                 res.setHeader('Content-Type', 'application/json');
@@ -445,7 +445,7 @@ export default defineConfig(({ mode }) => {
               if (message && message.startsWith('[TEST_SAVE_JSON]')) {
                 const text = [
                   'Ассистент: Обновляю сохранённую информацию согласно вашему запросу.',
-                  'SAVE_JSON: { "about_me": "Родился в Грозном. Гражданство России. Жена и дети — украинцы.", "environment": "Черногория, город Бар" }'
+                  'SAVE_JSON: { "about_me": "Example user profile", "environment": "Demo environment" }'
                 ].join('\n');
                 res.statusCode = 200;
                 res.setHeader('Content-Type', 'application/json');

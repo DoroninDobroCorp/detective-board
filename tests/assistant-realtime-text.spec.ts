@@ -38,7 +38,7 @@ test.describe('Assistant text chat (stubbed API)', () => {
         + 'Если захочешь, могу обновить профиль командой SAVE_JSON.',
       ];
       if (/save_json|обнов|сохран/i.test(userMessage)) {
-        replyLines.push('SAVE_JSON: {"about_me":"Родился в Грозном. Гражданство России. Жена и дети — украинцы.","environment":"Черногория, город Бар"}');
+        replyLines.push('SAVE_JSON: {"about_me":"Example user profile","environment":"Demo environment"}');
       }
       const payload = {
         id: 'resp_demo_text',

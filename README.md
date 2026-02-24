@@ -1,154 +1,123 @@
 # 🕵️ Detective Board
 
-Интерактивная доска для визуализации задач, связей и групп с производительностью 60 FPS на Canvas.
+> **⚠️ Проект архивирован.** Разработка прекращена — проект полностью переехал в закрытый репозиторий **upi/**. Этот код опубликован как портфолио и справочный материал.
 
-![License](https://img.shields.io/badge/license-MIT-blue)
-![Node](https://img.shields.io/badge/node-%3E%3D20-green)
-![TypeScript](https://img.shields.io/badge/typescript-5.8-blue)
+---
+
+Интерактивная доска для визуализации задач, связей и групп с производительностью **60 FPS** на Canvas.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.8-blue.svg)](https://www.typescriptlang.org/)
+[![React](https://img.shields.io/badge/React-19-61dafb.svg)](https://react.dev/)
+[![Vite](https://img.shields.io/badge/Vite-7-646cff.svg)](https://vitejs.dev/)
+
+---
 
 ## ✨ Возможности
 
-- 🎨 **Canvas рендеринг** через Konva — плавное перетаскивание 60 FPS
-- 📦 **Offline-first** — все данные в IndexedDB
-- 🔗 **Визуальные связи** между узлами с Bezier кривыми
-- 📁 **Иерархическая навигация** — вход в группы
-- 🤖 **AI-ассистент** — голосовой и текстовый режимы (Gemini, OpenAI)
-- 🎮 **Геймификация** — уровни, достижения, XP
-- ⚡ **Высокая производительность** — React.memo, Set, throttle, кэширование
+| | Функция | Описание |
+|---|---|---|
+| 🎨 | **Canvas рендеринг** | Konva.js — плавное перетаскивание при 60 FPS |
+| 📦 | **Offline-first** | Все данные в IndexedDB (Dexie), работает без сервера |
+| 🔗 | **Визуальные связи** | Bezier-кривые между узлами |
+| 📁 | **Иерархия** | Вложенные группы с навигацией внутрь |
+| 🤖 | **AI-ассистент** | Голосовой и текстовый (Google Gemini, OpenAI) |
+| 🎮 | **Геймификация** | Уровни, XP, достижения за выполнение задач |
+| 📱 | **Telegram-бот** | Отслеживание самочувствия через Telegram |
+| 📊 | **Экспорт/Импорт** | Полная миграция данных между устройствами |
 
-## 🚀 Быстрый старт
+---
 
-```bash
-# Клонирование
-git clone https://github.com/YOUR_USERNAME/detective-board.git
-cd detective-board
+## ⚡ Производительность
 
-# Установка зависимостей
-npm install
+Оптимизировано для **300–500 узлов** при стабильных **58–60 FPS**:
 
-# Инициализация Husky
-npm run prepare
+- `React.memo` с custom comparison
+- `Set` вместо `Array` для O(1) проверок
+- Прямое управление Konva refs (без store updates в drag)
+- Throttle 16ms = 60 FPS
+- Фейковые тени вместо дорогого `shadowBlur`
+- Konva caching для статичных узлов
+- Адаптивные режимы (normal / perf / super)
 
-# Запуск dev сервера
-npm run dev
-```
+---
 
-Откройте http://localhost:5173
-
-## 🧪 Тестирование
-
-```bash
-# Unit тесты (Vitest)
-npm run test
-
-# E2E тесты (Playwright)
-npm run test:e2e
-
-# Производительность
-npm run test:perf
-
-# Конкретный тест перетаскивания
-npm run test:drag
-```
-
-## 🔧 Скрипты
-
-| Команда | Описание |
-|---------|----------|
-| `npm run dev` | Запуск dev сервера |
-| `npm run build` | Сборка для production |
-| `npm run preview` | Просмотр production сборки |
-| `npm run lint` | Запуск ESLint |
-| `npm run lint:fix` | Исправление ошибок линтинга |
-| `npm run test` | Unit тесты |
-| `npm run test:ui` | Vitest UI |
-| `npm run test:coverage` | Coverage отчёт |
-| `npm run check` | Полная проверка (lint + test + e2e) |
-
-## 🤖 AI Ассистент
-
-The built-in assistant supports Google Gemini (default для текстового чата) and OpenAI. Configure the following environment variables before starting the dev server:
-
-- `GOOGLE_API_KEY` — ключ доступа к Google Generative Language API (Gemini).
-- `GOOGLE_TEXT_MODEL` *(опционально)* — идентификатор модели Gemini для текстового чата (по умолчанию `gemini-1.5-flash-latest`).
-- `OPENAI_API_KEY` — ключ OpenAI, используется для голосового режима и текстового чата при выборе OpenAI.
-- `OPENAI_TEXT_MODEL` *(опционально)* — модель OpenAI для текстового режима (по умолчанию `gpt-4o-mini`).
-
-Секретные ключи не коммитим в репозиторий. Создайте `.env.local`:
-
-```bash
-cp .env.example .env.local
-# Отредактируйте .env.local своими ключами
-```
-
-## 📊 Производительность
-
-Проект оптимизирован для работы с **300-500 узлами** при **60 FPS**:
-
-- ✅ React.memo с custom comparison
-- ✅ Set вместо Array для O(1) проверок
-- ✅ Прямое управление Konva refs (без store updates в drag)
-- ✅ Throttle для viewport (16ms = 60 FPS)
-- ✅ Фейковые тени вместо дорогого shadowBlur
-- ✅ Konva caching для статичных узлов
-- ✅ Адаптивные режимы (normal/perf/super)
-
-**Метрики:**
-- 🎯 FPS при drag: **58-60**
-- ⚡ Click response: **< 30ms**
-- 📈 100 узлов: **плавно**
-
-Подробнее: [`docs/OPTIMIZATION-SUMMARY.md`](./docs/OPTIMIZATION-SUMMARY.md)
-
-## 🏗️ Архитектура
-
-```
-detective-board/
-├── src/
-│   ├── components/      # React компоненты
-│   ├── pages/          # Страницы приложения
-│   ├── utils/          # Утилиты + тесты
-│   ├── assistant/      # AI интеграции
-│   ├── store.ts        # Zustand state management
-│   ├── db.ts           # Dexie (IndexedDB)
-│   └── types.ts        # TypeScript типы
-├── tests/              # E2E тесты (Playwright)
-├── memory-bank/        # Контекст проекта
-├── docs/               # Документация
-└── .github/workflows/  # CI/CD
-```
-
-## 🛠️ Технологии
+## 🛠 Технологии
 
 - **React 19** + **TypeScript 5.8** + **Vite 7**
 - **Konva 10** — Canvas рендеринг
 - **Zustand 5** — State management
-- **Dexie 4** — IndexedDB wrapper
+- **Dexie 4** — IndexedDB
 - **Vitest 2** — Unit тесты
-- **Playwright 1** — E2E тесты
+- **Playwright** — E2E тесты
 - **Husky + lint-staged** — Pre-commit hooks
+- **GitHub Actions** — CI/CD
 
-## 🤝 Контрибуция
+---
 
-Читайте [`CONTRIBUTING.md`](./CONTRIBUTING.md) для деталей процесса.
+## 🚀 Локальный запуск
 
-## 📝 История изменений
+```bash
+git clone https://github.com/DoroninDobroCorp/detective-board.git
+cd detective-board
+npm install
+npm run prepare   # Husky hooks
 
-См. [`CHANGELOG.md`](./CHANGELOG.md)
+# Скопируйте и настройте переменные окружения
+cp .env.example .env.local
 
-## 📚 Документация
+npm run dev
+```
 
-- [`memory-bank/`](./memory-bank/) — контекст и паттерны проекта
-- [`docs/OPTIMIZATION-SUMMARY.md`](./docs/OPTIMIZATION-SUMMARY.md) — оптимизации производительности
-- [`docs/FAKE-SHADOWS.md`](./docs/FAKE-SHADOWS.md) — техника фейковых теней
-- [`SETUP.md`](./SETUP.md) — инструкции по установке после изменений
+Откройте `http://localhost:5173`
+
+### 🤖 AI-ассистент (опционально)
+
+Для работы AI-ассистента добавьте ключи в `.env.local`:
+- `GOOGLE_API_KEY` — Google Gemini
+- `OPENAI_API_KEY` — OpenAI
+- `TELEGRAM_BOT_TOKEN` — Telegram-бот самочувствия
+
+---
+
+## 🧪 Тесты
+
+```bash
+npm run test          # Unit (Vitest)
+npm run test:e2e      # E2E (Playwright)
+npm run test:perf     # Производительность
+npm run lint          # ESLint
+npm run check         # Полная проверка
+```
+
+---
+
+## 📁 Структура
+
+```
+detective-board/
+├── src/
+│   ├── components/      # React-компоненты (Canvas, Toolbar, Inspector...)
+│   ├── pages/           # Страницы (задачи, дневник, достижения, медиа)
+│   ├── assistant/       # AI-интеграции (Gemini, OpenAI)
+│   ├── utils/           # Утилиты (throttle, debounce, raf-batch)
+│   ├── store.ts         # Zustand state management
+│   ├── db.ts            # Dexie (IndexedDB)
+│   ├── gamification.ts  # Система XP и достижений
+│   └── types.ts         # TypeScript типы
+├── tests/               # E2E тесты (Playwright)
+├── docs/                # Документация
+└── .github/workflows/   # CI/CD
+```
+
+---
 
 ## 📄 Лицензия
 
-MIT
+[MIT](LICENSE)
 
-## 🙏 Благодарности
+---
 
-- [Konva](https://konvajs.org/) за отличный Canvas framework
-- [Zustand](https://github.com/pmndrs/zustand) за простой state management
-- [Dexie](https://dexie.org/) за удобный IndexedDB wrapper
+<p align="center">
+  <i>Проект архивирован. Развитие продолжается в закрытом репозитории <b>upi/</b>.</i>
+</p>

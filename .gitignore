@@ -34,3 +34,8 @@ coverage
 env.local.playwright-browsers/
 .playwright-browsers/
 backups/*.tar.gz
+data-backups/
+all-storage-data.json
+*.png
+!public/*.png
+!src/assets/*.png

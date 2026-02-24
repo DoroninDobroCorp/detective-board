@@ -19,7 +19,7 @@ test.describe('Assistant SAVE_JSON (text mode)', () => {
     await page.route('**/api/openai/text', async (route) => {
       const replyLines = [
         'Рад помочь! Я обновил краткий профиль так, как вы попросили.',
-        'SAVE_JSON: {"about_me":"Родился в Грозном. Гражданство России. Жена и дети — украинцы.","environment":"Черногория, город Бар"}',
+        'SAVE_JSON: {"about_me":"Example user profile","environment":"Demo environment"}',
         'Если нужно что-то ещё — уточните.'
       ];
       const payload = {
@@ -60,7 +60,7 @@ test.describe('Assistant SAVE_JSON (text mode)', () => {
     await withTimeout(expect(input).toBeEnabled({ timeout: 20_000 }) as unknown as Promise<void>, 22_000, 'ожидание активного ввода');
 
     // Отправить тестовый запрос, вызывающий SAVE_JSON
-    const cmd = 'Пожалуйста, обнови профиль: Родился в Грозном, гражданство России. Жена и дети — украинцы. Живём в Черногории, город Бар.';
+    const cmd = 'Please update profile: Example user. Lives in Demo city.';
     await input.fill(cmd);
     await modal.getByRole('button', { name: 'Отправить' }).click();
 
@@ -77,9 +77,9 @@ test.describe('Assistant SAVE_JSON (text mode)', () => {
     }
 
     expect(typeof json).toBe('object');
-    expect(String(json.about_me || '')).toContain('Родился в Грозном');
+    expect(String(json.about_me || '')).toContain('Example user');
     expect(String(json.about_me || '')).toContain('Гражданство России');
-    expect(String(json.environment || '')).toContain('Черногория');
+    expect(String(json.environment || '')).toContain('Demo environment');
     expect(String(json.environment || '')).toContain('город Бар');
 
     // Проверяем, что транскрипт содержит как текст ответа, так и информацию после SAVE_JSON
@@ -95,7 +95,7 @@ test.describe('Assistant SAVE_JSON (text mode)', () => {
     const persisted = await page.evaluate(() => localStorage.getItem('ASSISTANT_SAVED_INFO_V1'));
     expect(persisted).toBeTruthy();
     const parsedPersisted = JSON.parse(persisted || '{}');
-    expect(String(parsedPersisted.about_me || '')).toContain('Родился в Грозном');
+    expect(String(parsedPersisted.about_me || '')).toContain('Example user');
     expect(String(parsedPersisted.environment || '')).toContain('город Бар');
   });
 });
